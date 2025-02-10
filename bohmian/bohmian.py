@@ -1,10 +1,10 @@
 from __future__ import annotations
-# from .. import sym
 from abc import ABC, abstractmethod
 import math
-from ..numiphy.findiffs import grids
-from ..numiphy.symlib import expressions as sym
-from . import VectorField2D, Line2D, Parallelogram
+from numiphy.symlib import expressions as sym
+from numiphy.findiffs import grids
+from numiphy.symlib.geom import Line2D, Parallelogram
+from numiphy.symlib.expressions import VectorField2D
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.optimize as sciopt
@@ -30,7 +30,7 @@ class SolvedPotential(ABC):
     def __init__(self, x: tuple[sym.Variable], m=1.):
         self.x = x
         self.nd = len(x)
-        self.t = sym.Variable('t', axis=self.nd)
+        self.t = sym.Variable('t')
         self.m = m
 
     @abstractmethod
@@ -56,7 +56,7 @@ class QuantumOscillator(SolvedPotential):
             omega = tuple(self.nd*[1])
         self.omega = omega
         self.x0 = tuple([math.sqrt(1/(m*omega[i])) for i in range(self.nd)])
-        self.weight = sym.exp(-sym.add(*[(self.x[i]/self.x0[i])**2/2 for i in range(self.nd)]))
+        self.weight = sym.exp(-sym.Add(*[(self.x[i]/self.x0[i])**2/2 for i in range(self.nd)]))
 
     def phi(self, *n):
         return QuantumState(self, n, 1)
@@ -68,9 +68,9 @@ class QuantumOscillator(SolvedPotential):
             coef *= 1/math.sqrt(2**n[i]*math.factorial(n[i]))*(math.pi*self.x0[i]**2)**-0.25
             polys.append(HermitePoly(n[i], self.x[i]).subs({self.x[i]: self.x[i]/self.x0[i]}))
         if weight:
-            return sym.mul(coef, *polys, self.weight)
+            return sym.Mul(coef, *polys, self.weight)
         else:
-            return sym.mul(coef, *polys)
+            return sym.Mul(coef, *polys)
     
     def energy(self, *n):
         return sum([self.omega[i]*(n[i]+0.5) for i in range(self.nd)])
@@ -112,11 +112,11 @@ class WaveFunction:
         return self.qs
     
     def get(self, time=False, norm=True):
-        return sym.add(*[fi.get_weightfree(time=time) for fi in self.qs]).expand()*self.V.weight/self.norm_coef**norm
+        return sym.Add(*[fi.get_weightfree(time=time) for fi in self.qs]).expand()*self.V.weight/self.norm_coef**norm
     
-    def ascallable(self, time=False, norm=True, lib='math'):
+    def ascallable(self, time=False, norm=True):
         psi = self.get(time=time, norm=norm)
-        return sym.ScalarLambdaExpr(lib, psi, psi.varnames)
+        return sym.ScalarLambdaExpr(psi, *self.V.x, self.V.t)
 
 
 class QuantumState(WaveFunction):
@@ -207,11 +207,11 @@ def HermitePoly(n: int, x: sym.Variable)->sym.Expr:
     '''
 
     if n == 0:
-        return sym.Const(1)
+        return sym.Expr.S.One
     elif n == 1:
         return 2*x
     else:
-        h0, h1 = sym.Const(1), 2*x
+        h0, h1 = sym.Expr.S.One, 2*x
         for i in range(2, n+1):
             h2 = 2*x*h1 - 2*(i-1)*h0
             h0, h1 = h1, h2
@@ -236,16 +236,16 @@ class Bohmian2D(VectorField2D):
         self.m = wf.V.m
         self.tvar = wf.V.t
 
-        self.Psi = wf.ascallable(time=True, norm=True, lib = 'math')
+        self.Psi = wf.ascallable(time=True, norm=True)
         psi = self.Psi.expr
         x, y = wf.V.x
-        self.gradPsi = sym.VectorLambdaExpr('numpy', [psi.diff(x), psi.diff(y)], [x, y, wf.V.t])
+        self.gradPsi = sym.VectorLambdaExpr([psi.diff(x), psi.diff(y)], x, y, wf.V.t)
 
         self.box = box
         self.rmax = rmax
         self.Nsub=Nsub
 
-        super().__init__(psi.diff(x)/psi/self.m, psi.diff(y)/psi/self.m, x, y, property='imag')
+        super().__init__(sym.Imag(psi.diff(x)/psi/self.m), sym.Imag(psi.diff(y)/psi/self.m), x, y) #it might need the time variable too
 
     def jacPsi(self, q, t):
         '''
@@ -311,10 +311,10 @@ class Bohmian2D(VectorField2D):
     def transformed(self, t, dt=1e-3):
         xN, yN = self.node(t)
         xNdot, yNdot = self.xNdot(t, dt)
-        u, v = sym.variables('u v')
+        u, v = sym.variables('u, v')
         Udot = self.x.expr.subs({self.xvar: u+xN, self.yvar: v+yN, self.tvar: t}) - xNdot*1j
         Vdot = self.y.expr.subs({self.xvar: u+xN, self.yvar: v+yN, self.tvar: t}) - yNdot*1j
-        return VectorField2D(Udot, Vdot, u, v, property='imag')
+        return VectorField2D(sym.Imag(Udot), sym.Imag(Vdot), u, v)
 
     def Xpoint_linedata(self, t, s, ds=1e-3, err=1e-8, u0=-1., v0=-1., dt=1e-3, h=1e-5):
         f = self.transformed(t, dt)
