@@ -66,7 +66,7 @@ class QuantumOscillator(SolvedPotential):
         polys = []
         for i in range(self.nd):
             coef *= 1/math.sqrt(2**n[i]*math.factorial(n[i]))*(math.pi*self.x0[i]**2)**-0.25
-            polys.append(HermitePoly(n[i], self.x[i]).subs({self.x[i]: self.x[i]/self.x0[i]}))
+            polys.append(HermitePoly(n[i], self.x[i]).replace({self.x[i]: self.x[i]/self.x0[i]}))
         if weight:
             return sym.Mul(coef, *polys, self.weight)
         else:
@@ -245,7 +245,7 @@ class Bohmian2D(VectorField2D):
         self.rmax = rmax
         self.Nsub=Nsub
 
-        super().__init__(sym.Imag(psi.diff(x)/psi/self.m), sym.Imag(psi.diff(y)/psi/self.m), x, y) #it might need the time variable too
+        super().__init__(sym.Imag(psi.diff(x)/psi/self.m), sym.Imag(psi.diff(y)/psi/self.m), x, y, wf.V.t) #it might need the time variable too
 
     def jacPsi(self, q, t):
         '''
