@@ -8,6 +8,7 @@ from numiphy.symlib.expressions import VectorField2D
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.optimize as sciopt
+from numiphy.odesolvers import *
 
 
 class Hermite:
@@ -340,3 +341,13 @@ class Bohmian2D(VectorField2D):
         ax.plot(xr2, yr2, color='red')
         plt.show()
         return fig, ax
+    
+
+def bohm_equations(psi: sym.Expr, x: sym.Variable, y: sym.Variable, t: sym.Variable, variational=False):
+
+    xdot = sym.Imag(psi.diff(x)/psi)
+    ydot = sym.Imag(psi.diff(y)/psi)
+
+    ode = SymbolicOde(xdot, ydot, symbols=[t, x, y], variational=variational)
+
+    return ode
