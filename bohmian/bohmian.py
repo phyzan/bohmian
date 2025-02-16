@@ -343,11 +343,9 @@ class Bohmian2D(VectorField2D):
         return fig, ax
     
 
-def bohm_equations(psi: sym.Expr, x: sym.Variable, y: sym.Variable, t: sym.Variable, variational=False):
+def bohm_equations(psi: sym.Expr, x: sym.Variable, y: sym.Variable, t: sym.Variable):
 
     xdot = sym.Imag(psi.diff(x)/psi)
     ydot = sym.Imag(psi.diff(y)/psi)
 
-    ode = SymbolicOde(xdot, ydot, symbols=[t, x, y], variational=variational)
-
-    return ode
+    return SymbolicOde(xdot, ydot, symbols=[t, x, y])
