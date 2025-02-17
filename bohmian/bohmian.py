@@ -232,23 +232,19 @@ class Bohmian2D(VectorField2D):
     with fictitious time parameter "s", not t
     '''
 
-    def __init__(self, wf: WaveFunction, box=[-10., 10., -10, 10.], rmax=1e-2, Nsub=100):
-        self.wf = wf
-        self.m = wf.V.m
-        self.tvar = wf.V.t
-
-        self.Psi = wf.ascallable(time=True, norm=True)
-        psi = self.Psi.expr
-        x, y = wf.V.x
-        self.gradPsi = sym.VectorLambdaExpr([psi.diff(x), psi.diff(y)], x, y, wf.V.t)
+    def __init__(self, psi: sym.Expr, symbols: tuple[sym.Variable, ...], args: tuple[sym.Variable, ...] = (), box=[-10., 10., -10, 10.], rmax=1e-2, Nsub=100):
+        self.tvar, x, y = symbols
+        self.Psi = sym.ScalarLambdaExpr(psi, x, y, self.tvar)
+        self.gradPsi = sym.VectorLambdaExpr([psi.diff(x), psi.diff(y)], x, y, self.tvar)
 
         self.box = box
         self.rmax = rmax
         self.Nsub=Nsub
+        self.args = args
 
-        super().__init__(sym.Imag(psi.diff(x)/psi/self.m), sym.Imag(psi.diff(y)/psi/self.m), x, y, wf.V.t) #it might need the time variable too
+        super().__init__(sym.Imag(psi.diff(x)/psi), sym.Imag(psi.diff(y)/psi), x, y, self.tvar) #it might need the time variable too
 
-    def jacPsi(self, q, t):
+    def jacPsi(self, q, t, *args):
         '''
         Construct the Jacobian of the wavefunction as a python callable.
         The jacobian is to be passed in a numerical solver to solve the system of
@@ -259,13 +255,13 @@ class Bohmian2D(VectorField2D):
         This is J = [[Re(Ψx), Re(Ψy)],
                      [Im(Ψx), Im(Ψy)]
         '''
-        return [self.gradPsi(*q, t).real, self.gradPsi(*q, t).imag]
+        return [self.gradPsi(*q, t, *args).real, self.gradPsi(*q, t, *args).imag]
 
-    def _psi_eqsystem(self, q, t):
-        psi = self.Psi(*q, t)
+    def _psi_eqsystem(self, q, t, *args):
+        psi = self.Psi(*q, t, *args)
         return [psi.real, psi.imag]
 
-    def node(self, t)->np.ndarray:
+    def node(self, t, *args)->np.ndarray:
         sq = Parallelogram(*self.box)
         flow = self.flow(sq, t)
         if abs(flow) < 1e-4:
@@ -294,31 +290,31 @@ class Bohmian2D(VectorField2D):
         xNdot, yNdot = (s2-s1)/(2*dt)
         return [xNdot, yNdot]
     
-    def flow(self, line: Line2D, t):
-        return super().flow(line, t)
+    def flow(self, line: Line2D, t, *args):
+        return super().flow(line, t, *args)
 
-    def loop(self, q, r, t):
-        return super().loop(q, r, t)
+    def loop(self, q, r, t, *args):
+        return super().loop(q, r, t, *args)
 
-    def plot(self, t, arrows=30, **kwargs):
-        return super().plot(self._grid(arrows), t, **kwargs)
+    def plot(self, t, arrows=30, *args, **kwargs):
+        return super().plot(self._grid(arrows), t, *args, **kwargs)
     
-    def plot_line(self, line: Line2D, t, arrows=30, n=400, **kwargs):
-        return super().plot_line(line, self._grid(arrows), n, t, **kwargs)
+    def plot_line(self, line: Line2D, t, arrows=30, n=400, *args, **kwargs):
+        return super().plot_line(line, self._grid(arrows), n, t, *args, **kwargs)
     
-    def plot_circle(self, q, r, t, arrows=30, n=400, **kwargs):
-        return super().plot_circle(q, r, self._grid(arrows), n, t, **kwargs)
+    def plot_circle(self, q, r, t, arrows=30, n=400, *args, **kwargs):
+        return super().plot_circle(q, r, self._grid(arrows), n, t, *args, **kwargs)
 
     def transformed(self, t, dt=1e-3):
         xN, yN = self.node(t)
         xNdot, yNdot = self.xNdot(t, dt)
         u, v = sym.variables('u, v')
-        Udot = self.x.expr.subs({self.xvar: u+xN, self.yvar: v+yN, self.tvar: t}) - xNdot*1j
-        Vdot = self.y.expr.subs({self.xvar: u+xN, self.yvar: v+yN, self.tvar: t}) - yNdot*1j
-        return VectorField2D(sym.Imag(Udot), sym.Imag(Vdot), u, v)
+        Udot = self.x.expr.replace({self.xvar: u+xN, self.yvar: v+yN, self.tvar: t}) - xNdot*1j
+        Vdot = self.y.expr.replace({self.xvar: u+xN, self.yvar: v+yN, self.tvar: t}) - yNdot*1j
+        return VectorField2D(sym.Imag(Udot), sym.Imag(Vdot), u, v, *self.args)
 
-    def Xpoint_linedata(self, t, s, ds=1e-3, err=1e-8, u0=-1., v0=-1., dt=1e-3, h=1e-5):
-        f = self.transformed(t, dt)
+    def Xpoint_linedata(self, t, s, ds=1e-3, err=1e-8, u0=-1., v0=-1., dt=1e-3, h=1e-5, args=()):
+        f = self.transformed(t, dt, *args)
         u, v = f.fixed_point(u0, v0)
         p = np.array([u, v])
         jac = f.Jac(u, v)
@@ -332,8 +328,8 @@ class Bohmian2D(VectorField2D):
 
         return f, xb1, yb1, xb2, yb2, xr1, yr1, xr2, yr2
 
-    def plot_Xpoint(self, grid: grids.Grid, t, s, ds=1e-3, err=1e-8, u0=-1., v0=-1., dt=1e-3, h=1e-5):
-        f, xb1, yb1, xb2, yb2, xr1, yr1, xr2, yr2 = self.Xpoint_linedata(t, s, ds, err, u0, v0, dt, h)
+    def plot_Xpoint(self, grid: grids.Grid, t, s, ds=1e-3, err=1e-8, u0=-1., v0=-1., dt=1e-3, h=1e-5, args=()):
+        f, xb1, yb1, xb2, yb2, xr1, yr1, xr2, yr2 = self.Xpoint_linedata(t, s, ds, err, u0, v0, dt, h, args)
         fig, ax = f.plot(grid)
         ax.plot(xb1, yb1, color='blue')
         ax.plot(xb2, yb2, color='blue')
@@ -342,6 +338,28 @@ class Bohmian2D(VectorField2D):
         plt.show()
         return fig, ax
     
+    @cached_property
+    def sym_ode(self):
+        psi = self.Psi.expr
+        x, y = self.xvar, self.yvar
+        xdot = sym.Imag(psi.diff(x)/psi)
+        ydot = sym.Imag(psi.diff(y)/psi)
+
+        return SymbolicOde(xdot, ydot, symbols=[self.tvar, x, y], args=self.args)
+    
+    def ode_system(self, variational=False, lowlevel=True, stack=True):
+        return self.sym_ode.ode(lowlevel=lowlevel, stack=stack, variational=variational)
+    
+    def variational_orbit(self, x0, variational=False, lowlevel=True, stack=True):
+        if variational:
+            x0 = list(x0) + [1 for _ in range(len(x0))]
+            orb = VariationalFlowOrbit(self.sym_ode, lowlevel=lowlevel, stack=stack)
+        else:
+            orb = FlowOrbit(self.sym_ode, lowlevel=lowlevel, stack=stack)
+        orb.set_ics(0, x0)
+        return orb
+        
+
 
 def bohm_equations(psi: sym.Expr, x: sym.Variable, y: sym.Variable, t: sym.Variable):
 
