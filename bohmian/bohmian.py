@@ -233,7 +233,7 @@ class Bohmian2D(VectorField2D):
     '''
 
     def __init__(self, psi: sym.Expr, symbols: tuple[sym.Variable, ...], args: tuple[sym.Variable, ...] = (), box=[-10., 10., -10, 10.], rmax=1e-2, Nsub=100):
-        self.tvar, x, y = symbols
+        x, y, self.tvar = symbols
         self.Psi = sym.ScalarLambdaExpr(psi, x, y, self.tvar)
         self.gradPsi = sym.VectorLambdaExpr([psi.diff(x), psi.diff(y)], x, y, self.tvar)
 
@@ -350,7 +350,7 @@ class Bohmian2D(VectorField2D):
     def ode_system(self, variational=False, lowlevel=True, stack=True):
         return self.sym_ode.ode(lowlevel=lowlevel, stack=stack, variational=variational)
     
-    def variational_orbit(self, x0, variational=False, lowlevel=True, stack=True):
+    def orbit(self, x0, variational=False, lowlevel=True, stack=True):
         if variational:
             x0 = list(x0) + [1 for _ in range(len(x0))]
             orb = VariationalFlowOrbit(self.sym_ode, lowlevel=lowlevel, stack=stack)
@@ -358,12 +358,3 @@ class Bohmian2D(VectorField2D):
             orb = FlowOrbit(self.sym_ode, lowlevel=lowlevel, stack=stack)
         orb.set_ics(0, x0)
         return orb
-        
-
-
-def bohm_equations(psi: sym.Expr, x: sym.Variable, y: sym.Variable, t: sym.Variable):
-
-    xdot = sym.Imag(psi.diff(x)/psi)
-    ydot = sym.Imag(psi.diff(y)/psi)
-
-    return SymbolicOde(xdot, ydot, symbols=[t, x, y])
