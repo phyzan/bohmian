@@ -338,23 +338,20 @@ class Bohmian2D(VectorField2D):
         plt.show()
         return fig, ax
     
-    @cached_property
-    def sym_ode(self):
+    def ode_system(self, events: list[SymbolicEvent], stop_events: list[SymbolicStopEvent]):
         psi = self.Psi.expr
         x, y = self.xvar, self.yvar
         xdot = sym.Imag(psi.diff(x)/psi)
         ydot = sym.Imag(psi.diff(y)/psi)
 
-        return SymbolicOde(xdot, ydot, symbols=[self.tvar, x, y], args=self.args)
+        return OdeSystem([xdot, ydot], self.tvar, x, y, args=self.args, events=events, stop_events=stop_events)
     
-    def ode_system(self, variational=False, lowlevel=True, stack=True):
-        return self.sym_ode.ode(lowlevel=lowlevel, stack=stack, variational=variational)
-    
-    def orbit(self, x0, variational=False, lowlevel=True, stack=True):
-        if variational:
-            x0 = list(x0) + [1 for _ in range(len(x0))]
-            orb = VariationalFlowOrbit(self.sym_ode, lowlevel=lowlevel, stack=stack)
-        else:
-            orb = FlowOrbit(self.sym_ode, lowlevel=lowlevel, stack=stack)
-        orb.set_ics(0, x0)
-        return orb
+    def ode_system(self, events: list[SymbolicEvent], stop_events: list[SymbolicStopEvent]):
+
+        psi = self.Psi.expr
+        x, y = self.xvar, self.yvar
+        xdot = sym.Imag(psi.diff(x)/psi)
+        ydot = sym.Imag(psi.diff(y)/psi)
+        delx, dely = variables("delx, dely")
+
+        return VariationalOdeSystem([xdot, ydot], self.tvar, (x, y), (delx, dely), args=self.args, events=events, stop_events=stop_events)
