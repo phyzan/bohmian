@@ -1,19 +1,20 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
 import math
-from numiphy.symlib import expressions as sym
+from numiphy.symlib import symcore as sym
 from numiphy.findiffs import grids
 from numiphy.symlib.geom import Line2D, Parallelogram
-from numiphy.symlib.expressions import VectorField2D
+from numiphy.symlib.vectorfields import VectorField2D
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.optimize as sciopt
 from numiphy.odesolvers import *
+from numiphy.symlib.pylambda import ScalarLambdaExpr, VectorLambdaExpr
 
 
 class Hermite:
 
-    def __init__(self, *x: sym.Variable):
+    def __init__(self, *x: sym.Symbol):
         self.x = x
         self.nd = len(x)
 
@@ -28,10 +29,10 @@ class SolvedPotential(ABC):
 
     weight: sym.Expr
 
-    def __init__(self, x: tuple[sym.Variable], m=1.):
+    def __init__(self, x: tuple[sym.Symbol], m=1.):
         self.x = x
         self.nd = len(x)
-        self.t = sym.Variable('t')
+        self.t = sym.Symbol('t')
         self.m = m
 
     @abstractmethod
@@ -51,7 +52,7 @@ class QuantumOscillator(SolvedPotential):
     '''
     hbar = 1 is assumed
     '''
-    def __init__(self, x: tuple[sym.Variable], omega: tuple[float]=None, m=1.):
+    def __init__(self, x: tuple[sym.Symbol], omega: tuple[float]=None, m=1.):
         super().__init__(x, m)
         if omega is None:
             omega = tuple(self.nd*[1])
@@ -193,7 +194,7 @@ def _WaveFunction(qs: list[QuantumState]):
         return WaveFunction(qs)
 
 
-def HermitePoly(n: int, x: sym.Variable)->sym.Expr:
+def HermitePoly(n: int, x: sym.Symbol)->sym.Expr:
     '''
     Hermite Polynomial of the n-th order.
 
@@ -232,17 +233,17 @@ class Bohmian2D(VectorField2D):
     with fictitious time parameter "s", not t
     '''
 
-    def __init__(self, psi: sym.Expr, symbols: tuple[sym.Variable, ...], args: tuple[sym.Variable, ...] = (), box=[-10., 10., -10, 10.], rmax=1e-2, Nsub=100):
+    def __init__(self, psi: Expr, symbols: tuple[sym.Symbol, ...], args: tuple[sym.Symbol, ...] = (), box=[-10., 10., -10, 10.], rmax=1e-2, Nsub=100):
         x, y, self.tvar = symbols
-        self.Psi = sym.ScalarLambdaExpr(psi, x, y, self.tvar)
-        self.gradPsi = sym.VectorLambdaExpr([psi.diff(x), psi.diff(y)], x, y, self.tvar)
+        self.Psi = ScalarLambdaExpr(psi, x, y, self.tvar)
+        self.gradPsi = VectorLambdaExpr([psi.diff(x), psi.diff(y)], x, y, self.tvar)
 
         self.box = box
         self.rmax = rmax
         self.Nsub=Nsub
         self.args = args
 
-        super().__init__(sym.Imag(psi.diff(x)/psi), sym.Imag(psi.diff(y)/psi), x, y, self.tvar) #it might need the time variable too
+        super().__init__(sym.Imag(psi.diff(x)/psi), sym.Imag(psi.diff(y)/psi), x, y, self.tvar) #it might need the time Symbol too
 
     def jacPsi(self, q, t, *args):
         '''
@@ -308,9 +309,9 @@ class Bohmian2D(VectorField2D):
     def transformed(self, t, dt=1e-3):
         xN, yN = self.node(t)
         xNdot, yNdot = self.xNdot(t, dt)
-        u, v = sym.variables('u, v')
-        Udot = self.x.expr.replace({self.xvar: u+xN, self.yvar: v+yN, self.tvar: t}) - xNdot*1j
-        Vdot = self.y.expr.replace({self.xvar: u+xN, self.yvar: v+yN, self.tvar: t}) - yNdot*1j
+        u, v = variables('u, v')
+        Udot = self.x.expr.subs({self.xvar: u+xN, self.yvar: v+yN, self.tvar: t}) - xNdot*1j
+        Vdot = self.y.expr.subs({self.xvar: u+xN, self.yvar: v+yN, self.tvar: t}) - yNdot*1j
         return VectorField2D(sym.Imag(Udot), sym.Imag(Vdot), u, v, *self.args)
 
     def Xpoint_linedata(self, t, s, ds=1e-3, err=1e-8, u0=-1., v0=-1., dt=1e-3, h=1e-5, args=()):
@@ -338,20 +339,10 @@ class Bohmian2D(VectorField2D):
         plt.show()
         return fig, ax
     
-    def ode_system(self, events: list[SymbolicEvent], stop_events: list[SymbolicStopEvent]):
+    def ode_system(self, events: list[AnySymbolicEvent]):
         psi = self.Psi.expr
         x, y = self.xvar, self.yvar
         xdot = sym.Imag(psi.diff(x)/psi)
         ydot = sym.Imag(psi.diff(y)/psi)
 
-        return OdeSystem([xdot, ydot], self.tvar, x, y, args=self.args, events=events, stop_events=stop_events)
-    
-    def ode_system(self, events: list[SymbolicEvent], stop_events: list[SymbolicStopEvent]):
-
-        psi = self.Psi.expr
-        x, y = self.xvar, self.yvar
-        xdot = sym.Imag(psi.diff(x)/psi)
-        ydot = sym.Imag(psi.diff(y)/psi)
-        delx, dely = variables("delx, dely")
-
-        return VariationalOdeSystem([xdot, ydot], self.tvar, (x, y), (delx, dely), args=self.args, events=events, stop_events=stop_events)
+        return OdeSystem([xdot, ydot], self.tvar, x, y, args=self.args, events=events)
