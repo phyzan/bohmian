@@ -9,7 +9,7 @@ class VariationalBohmianSystem(OdeSystem):
     psi: Expr
     DELTA_T: float
 
-    def __new__(cls, arg1: Expr|tuple[Expr, Expr, Expr], t: Symbol, x: Symbol, y: Symbol, delx: Symbol, dely: Symbol, args: Iterable[Symbol], DELTA_T: float):        
+    def __new__(cls, arg1: Expr|tuple[Expr, Expr, Expr, Expr, Expr], t: Symbol, x: Symbol, y: Symbol, delx: Symbol, dely: Symbol, args: Iterable[Symbol], DELTA_T: float)->VariationalBohmianSystem:        
         if hasattr(arg1, '__iter__'):
             psi, xdot, ydot, delx_dot, dely_dot = arg1
         else:
@@ -55,6 +55,9 @@ class BohmianOrbit(Orbit):
         fig = SquareFigure("Bohmian Orbit", xlabel='x', ylabel='y')
         fig.add(LinePlot(x=self.x, y=self.y, **kwargs))
         return fig
+    
+    def plot(self, **kwargs):
+        return self.figure(**kwargs).plot()
 
 
 
@@ -88,6 +91,11 @@ class VariationalBohmianOrbit(BohmianOrbit):
         t = self.t_lyap
         return self.logksi/t
     
+    def plot_lyap(self, **kwargs):
+        fig = Figure("Lyapunov exponent", xlabel='t', ylabel='$\\lambda$')
+        fig.add(LinePlot(x=self.t_lyap, y=self.lyap, **kwargs))
+        return fig.plot()
+    
 
 
 class OrbitCollection:
@@ -96,6 +104,8 @@ class OrbitCollection:
         self.model = model
         self.orbits = [self.model.get_orbit(*ic, rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, args=args) for ic in ics]
         self.t_current = 0
+        self._logksi = [[0] for _ in self.orbits]
+        self._t_lyap = [0]
 
     @property
     def DELTA_T(self):
@@ -105,7 +115,7 @@ class OrbitCollection:
     def good_orbits(self):
         return [orb for orb in self.orbits if not orb.is_dead]
     
-    def integrate(self, interval, num, max_frames=0, threads=-1):  
+    def integrate(self, interval, num, threads=-1, clear=True):
         goal = self.t_current+interval
         delta_t = num*self.DELTA_T
         N = round(interval//delta_t)+1
@@ -114,28 +124,49 @@ class OrbitCollection:
             if not self.good_orbits:
                 break
             t_int = min(delta_t, goal-self.t_current)
-            self.model.integrate_all(self.good_orbits, interval=t_int, max_frames=max_frames, threads=threads, max_events=-1)
+            self.model.integrate_all(self.good_orbits, interval=t_int, max_frames=0, threads=threads, max_events=-1)
             self.t_current += t_int
             if t_int < self.DELTA_T:
                 break
+            self._t_lyap.append(self.t_current)
+            for j, orb in enumerate(self.orbits):
+                if orb.diverges:
+                    continue
+                _logksi = logksi(orb.q[1:])
+                self._logksi[j].append(_logksi[-1]+self._logksi[j][-1])
+                if clear:
+                    orb.clear()
     
     @property
-    def t(self):
-        return np.arange(self.DELTA_T, (self.t_current//self.DELTA_T)*self.DELTA_T + 1, self.DELTA_T)
+    def t_lyap(self):
+        return np.array(self._t_lyap[1:])
 
     @property
-    def lyap_all(self):
-        return np.array([orb.lyap for orb in self.good_orbits])
+    def logksi(self):
+        return np.array([logksi_[1:] for logksi_, orb in zip(self._logksi, self.orbits) if not orb.is_dead])
+    
+    @property
+    def lyap(self):
+        return self.logksi/self.t_lyap
     
     @property
     def lyap_mean(self):
-        return np.mean(self.lyap_all, axis=0)
+        return np.mean(self.lyap, axis=0)
     
     @property
     def lyap_std(self):
-        return np.std(self.lyap_all, axis=0)
+        return np.std(self.lyap, axis=0)
+    
+    @property
+    def lyap_mean_error(self):
+        return self.lyap_std/np.sqrt(len(self.good_orbits)-1)
     
     def hist(self, i=-1, bins=10, range=None, density=None, weights=None):
-        data = self.lyap_all
+        data = self.lyap
         hist_data, bin_edges = np.histogram(data[:, i], bins, range, density, weights)
         return bin_edges[1:]+np.diff(bin_edges)/2, hist_data
+    
+def logksi(q)->np.ndarray:
+    ksi_array = np.linalg.norm(q[:, 2:], axis=1)
+    logksi = np.log(ksi_array).cumsum()
+    return logksi
