@@ -93,8 +93,11 @@ class VariationalBohmianOrbit(BohmianOrbit):
     
     def plot_lyap(self, **kwargs):
         fig = Figure("Lyapunov exponent", xlabel='t', ylabel='$\\lambda$')
-        fig.add(LinePlot(x=self.t_lyap, y=self.lyap, **kwargs))
+        fig.add(self.lyap_line(**kwargs))
         return fig.plot()
+    
+    def lyap_line(self, **kwargs):
+        return LinePlot(x=self.t_lyap, y=self.lyap, **kwargs)
     
 
 
@@ -110,7 +113,7 @@ class OrbitCollection:
     @property
     def DELTA_T(self):
         return self.model.DELTA_T
-
+    
     @property
     def good_orbits(self):
         return [orb for orb in self.orbits if not orb.is_dead]
@@ -146,23 +149,26 @@ class OrbitCollection:
         return np.array([logksi_[1:] for logksi_, orb in zip(self._logksi, self.orbits) if not orb.is_dead])
     
     @property
-    def lyap(self):
+    def lyap_all(self):
         return self.logksi/self.t_lyap
     
-    @property
-    def lyap_mean(self):
-        return np.mean(self.lyap, axis=0)
+    def lyap(self, l=0.005):
+        res = self.lyap_all
+        return res[abs(res)[:, -1]>l]
     
-    @property
-    def lyap_std(self):
-        return np.std(self.lyap, axis=0)
+    def lyap_mean(self, l=0.005):
+        return np.mean(self.lyap(l), axis=0)
     
-    @property
-    def lyap_mean_error(self):
-        return self.lyap_std/np.sqrt(len(self.good_orbits)-1)
+    def lyap_std(self, l=0.005):
+        return np.std(self.lyap(l), axis=0)
     
-    def hist(self, i=-1, bins=10, range=None, density=None, weights=None):
-        data = self.lyap
+    def lyap_mean_error(self, l=0.005):
+        sample = self.lyap(l)
+        std = np.std(sample, axis=0)
+        return std/np.sqrt(sample.shape[0]-1)
+    
+    def hist(self, l=0.005, i=-1, bins=10, range=None, density=None, weights=None):
+        data = self.lyap(l)
         hist_data, bin_edges = np.histogram(data[:, i], bins, range, density, weights)
         return bin_edges[1:]+np.diff(bin_edges)/2, hist_data
     
