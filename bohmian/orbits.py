@@ -27,9 +27,9 @@ class VariationalBohmianSystem(OdeSystem):
         obj.DELTA_T = DELTA_T
         return cls._process_args(obj, [xdot, ydot, delx_dot, dely_dot], t, x, y, delx, dely, args=args, events=[renorm])
 
-    def get_orbit(self, x0, y0, rtol=0, atol=1e-9, min_step=0, max_step=np.inf, first_step=0, args=())->VariationalBohmianOrbit:
+    def get_orbit(self, x0, y0, t0=0., rtol=0., atol=1e-9, min_step=0, max_step=np.inf, first_step=0, args=())->VariationalBohmianOrbit:
         q0 = np.array([x0, y0, np.sqrt(2)/2, np.sqrt(2)/2])
-        ode = self.get(0, q0, rtol, atol, min_step, max_step, first_step, args, method="RK45", no_math_errno=True)
+        ode = self.get(t0, q0, rtol, atol, min_step, max_step, first_step, args, method="RK45", no_math_errno=True)
         return VariationalBohmianOrbit(ode)
 
     def __eq__(self, other):
