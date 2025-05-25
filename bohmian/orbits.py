@@ -77,10 +77,9 @@ class OrbitCollection:
 
     def __init__(self, model: VariationalBohmianSystem, ics: Iterable[tuple[float, float]], args = (), **odeargs):
         self.model = model
-        self.params = np.stack(np.meshgrid(*[arg if hasattr(arg, '__iter__') else [arg] for arg in args], indexing='ij'), axis=-1)
-        self._orbits = np.empty(shape = self.params.shape, dtype=object)
-        for ind, params in zip(np.ndindex(self.params.shape), itertools.product(self.params)):
-            self._orbits[*ind] = [self.model.get_orbit(*ic, args = tuple(params[0]), **odeargs) for ic in ics]
+        self._orbits = np.empty(shape = [len(x) for x in args], dtype=object)
+        for ind, params in zip(np.ndindex(self._orbits.shape), itertools.product(*reversed([arg if hasattr(arg, '__iter__') else [arg] for arg in args]))):
+            self._orbits[*ind] = [self.model.get_orbit(*ic, args = tuple(reversed(params)), **odeargs) for ic in ics]
 
     def orbits(self, *index: int)->list[VariationalBohmianOrbit]:
         if not index:
@@ -141,3 +140,7 @@ class OrbitCollection:
         hist_data, bin_edges = np.histogram(data[:, i], bins, range, density, weights)
         return bin_edges[1:]+np.diff(bin_edges)/2, hist_data
     
+    def data(self, l=0.005, *index):
+        lyap = self.lyap(l, *index)
+        err = self.lyap_mean_error(l, *index)
+        return self.t_lyap, lyap, err
