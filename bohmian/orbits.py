@@ -2,6 +2,8 @@ from __future__ import annotations
 from numiphy.symlib.symcore import *
 from numiphy.toolkit.plotting import *
 from numiphy.odesolvers import *
+from typing import Any
+import itertools
 
 
 class VariationalBohmianSystem(OdeSystem):
@@ -73,49 +75,69 @@ class VariationalBohmianOrbit(BohmianOrbit, VariationalLowLevelODE):
 
 class OrbitCollection:
 
-    def __init__(self, model: VariationalBohmianSystem, ics: Iterable[tuple[float, float]], rtol=0, atol=1e-9, min_step=0, max_step=np.inf, first_step=0, args=()):
+    def __init__(self, model: VariationalBohmianSystem, ics: Iterable[tuple[float, float]], args = (), **odeargs):
         self.model = model
-        self.orbits = [self.model.get_orbit(*ic, rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, args=args) for ic in ics]
+        self.params = np.stack(np.meshgrid(*[arg if hasattr(arg, '__iter__') else [arg] for arg in args], indexing='ij'), axis=-1)
+        self._orbits = np.empty(shape = self.params.shape, dtype=object)
+        for ind, params in zip(np.ndindex(self.params.shape), itertools.product(self.params)):
+            self._orbits[*ind] = [self.model.get_orbit(*ic, args = tuple(params[0]), **odeargs) for ic in ics]
 
+    def orbits(self, *index: int)->list[VariationalBohmianOrbit]:
+        if not index:
+            return self._orbits.flat[0]
+        else:
+            return self._orbits[*index]
+        
+    @property
+    def all_orbits(self)->list[VariationalBohmianOrbit]:
+        res = []
+        for orbits in self._orbits.flat:
+            res += orbits
+        return res
+    
     @property
     def DELTA_T(self):
         return self.model.DELTA_T
     
+    def good_orbits(self, *index):
+        return [orb for orb in self.orbits(*index) if not orb.is_dead]
+    
     @property
-    def good_orbits(self):
-        return [orb for orb in self.orbits if not orb.is_dead]
+    def all_good_orbits(self):
+        return [orb for orb in self.all_orbits if not orb.is_dead]
     
     def integrate(self, interval, lyap_period, threads=-1):
-        var_integrate_all(self.orbits, interval=interval, lyap_period=lyap_period, threads=threads, max_prints=0)
+        var_integrate_all(self.all_orbits, interval=interval, lyap_period=lyap_period, threads=threads)
     
     @property
     def t_lyap(self):
-        for orb in self.orbits:
+        for orb in self.all_orbits:
             if not orb.is_dead:
                 return orb.t_lyap
         raise ValueError('')
     
     @property
     def lyap_all(self):
-        return np.array([orb.lyap for orb in self.good_orbits])
+        return np.array([orb.lyap for orb in self.all_good_orbits])
     
-    def lyap(self, l=0.005):
-        res = self.lyap_all
+    
+    def lyap(self, l=0.005, *index):
+        res = np.array([orb.lyap for orb in self.good_orbits(*index)])
         return res[abs(res)[:, -1]>l]
     
-    def lyap_mean(self, l=0.005):
-        return np.mean(self.lyap(l), axis=0)
+    def lyap_mean(self, l=0.005, *index):
+        return np.mean(self.lyap(l, *index), axis=0)
     
-    def lyap_std(self, l=0.005):
-        return np.std(self.lyap(l), axis=0)
+    def lyap_std(self, l=0.005, *index):
+        return np.std(self.lyap(l, *index), axis=0)
     
-    def lyap_mean_error(self, l=0.005):
-        sample = self.lyap(l)
+    def lyap_mean_error(self, l=0.005, *index):
+        sample = self.lyap(l, *index)
         std = np.std(sample, axis=0)
         return std/np.sqrt(sample.shape[0]-1)
     
-    def hist(self, l=0.005, i=-1, bins=10, range=None, density=None, weights=None):
-        data = self.lyap(l)
+    def hist(self, l=0.005, index=(), i=-1, bins=10, range=None, density=None, weights=None):
+        data = self.lyap(l, *index)
         hist_data, bin_edges = np.histogram(data[:, i], bins, range, density, weights)
         return bin_edges[1:]+np.diff(bin_edges)/2, hist_data
     
