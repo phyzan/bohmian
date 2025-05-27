@@ -77,7 +77,7 @@ class OrbitCollection:
 
     def __init__(self, model: VariationalBohmianSystem, ics: Iterable[tuple[float, float]], args = (), **odeargs):
         self.model = model
-        self._orbits = np.empty(shape = [len(x) for x in args], dtype=object)
+        self._orbits = np.empty(shape = [len(x) if hasattr(x, '__iter__') else 1 for x in args], dtype=object)
         for ind, params in zip(np.ndindex(self._orbits.shape), itertools.product(*reversed([arg if hasattr(arg, '__iter__') else [arg] for arg in args]))):
             self._orbits[*ind] = [self.model.get_orbit(*ic, args = tuple(reversed(params)), **odeargs) for ic in ics]
 
