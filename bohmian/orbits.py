@@ -105,8 +105,8 @@ class OrbitCollection:
     def all_good_orbits(self):
         return [orb for orb in self.all_orbits if not orb.is_dead]
     
-    def integrate(self, interval, lyap_period, threads=-1):
-        var_integrate_all(self.all_orbits, interval=interval, lyap_period=lyap_period, threads=threads)
+    def integrate(self, interval, lyap_period, threads=-1, display_progress=False):
+        var_integrate_all(self.all_orbits, interval=interval, lyap_period=lyap_period, threads=threads, display_progress=display_progress)
     
     @property
     def t_lyap(self):
