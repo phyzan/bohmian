@@ -60,8 +60,8 @@ class BohmianOrbit(LowLevelODE):
 
 class VariationalBohmianOrbit(BohmianOrbit, VariationalLowLevelODE):
 
-    def __init__(self, f: LowLevelFunction, t0: float, q0: np.ndarray, period: float, *, rtol=1e-6, atol=1e-12, min_step=0., max_step=np.inf, first_step=0., args=(), method="RK45", events: LowLevelEventArray=None, save_dir="", save_events_only=False):
-        VariationalLowLevelODE.__init__(self, f, t0, q0, period, rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, args=args, method=method, events=events, save_dir=save_dir, save_events_only=save_events_only)
+    def __init__(self, f: LowLevelFunction, t0: float, q0: np.ndarray, period: float, *, rtol=1e-6, atol=1e-12, min_step=0., max_step=np.inf, first_step=0., args=(), events: LowLevelEventArray=None, method="RK45"):
+        VariationalLowLevelODE.__init__(self, f, t0, q0, period, rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, args=args, events=events, method=method)
 
     @property
     def delx(self):
