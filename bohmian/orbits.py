@@ -25,8 +25,8 @@ class VariationalBohmianSystem(OdeSystem):
         obj.DELTA_T = DELTA_T
         return cls._process_args(obj, [xdot, ydot, delx_dot, dely_dot], t, x, y, delx, dely, args=args)
 
-    def get_orbit(self, x0, y0, t0=0., rtol=0., atol=1e-9, min_step=0, max_step=np.inf, first_step=0, args=()):
-        return CartesianVariationalOrbit2D(f=self.lowlevel_odefunc, t0=t0, q0=[x0, y0, 1, 1], period=self.DELTA_T, rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, args=args, events=self.lowlevel_events)
+    def get_orbit(self, x0, y0, t0=0., rtol=0., atol=1e-9, min_step=0, max_step=np.inf, first_step=0, args=(), method="RK45"):
+        return CartesianVariationalOrbit2D(f=self.lowlevel_odefunc, jac=self.lowlevel_jac, t0=t0, q0=[x0, y0, 1, 1], period=self.DELTA_T, rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, args=args, events=self.lowlevel_events, method=method)
 
     def __eq__(self, other):
         if other is self:
