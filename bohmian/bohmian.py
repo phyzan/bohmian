@@ -383,7 +383,7 @@ class Bohmian2D(VectorField2D):
     
     def orbit(self, x0, y0, t0=0., rtol=0, atol=1e-12, min_step=0., max_step=np.inf, first_step=0., args=()):
         s = self.ode_system
-        return CartesianOrbit2D(s.lowlevel_odefunc, s.lowlevel_jac, t0, np.array([x0, y0]), rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, args=args, method="RK45", no_math_errno=True, events=s.lowlevel_events)
+        return CartesianOrbit2D(s.lowlevel_odefunc, jac=s.lowlevel_jac, t0=t0, q0=np.array([x0, y0]), rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, args=args, method="RK45", no_math_errno=True, events=s.true_events)
     
     def variational_orbit(self, x0, y0, t0=0., rtol=0, atol=1e-12, min_step=0., max_step=np.inf, first_step=0., args=(), DELTA_T=0.05):
         return self.varode_sys(DELTA_T=DELTA_T).get_orbit(x0, y0, t0=t0, rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, args=args)
