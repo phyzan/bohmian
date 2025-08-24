@@ -376,7 +376,7 @@ class Bohmian2D(VectorField2D):
     
     @cached_property
     def ode_system(self):
-        return OdeSystem(self._odesys_data, self.tvar, self.xvar, self.yvar, args=self.args)
+        return OdeSystem(self._odesys_data, self.tvar, [self.xvar, self.yvar], args=self.args)
     
     def varode_sys(self, DELTA_T):
         return VariationalBohmianSystem((self.psi, *self._varodesys_data), self.tvar, self.xvar, self.yvar, self.delx, self.dely, self.args, DELTA_T)
