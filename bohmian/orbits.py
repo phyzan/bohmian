@@ -5,6 +5,25 @@ from numiphy.odesolvers import *
 import itertools
 
 
+class BohmianOrbit(VariationalLowLevelODE):
+
+    @property
+    def x(self):
+        return self.q[:, 0]
+    
+    @property
+    def y(self):
+        return self.q[:, 1]
+    
+    @property
+    def delx(self):
+        return self.q[:, 2]
+    
+    @property
+    def dely(self):
+        return self.q[:, 3]
+
+
 class VariationalBohmianSystem(OdeSystem):
 
     psi: Expr
@@ -26,7 +45,7 @@ class VariationalBohmianSystem(OdeSystem):
         return cls._process_args(obj, [xdot, ydot, delx_dot, dely_dot], t, [x, y, delx, dely], args=args)
 
     def get_orbit(self, x0, y0, t0=0., rtol=0., atol=1e-9, min_step=0, max_step=np.inf, first_step=0, args=(), method="RK45"):
-        return CartesianVariationalOrbit2D(f=self.lowlevel_odefunc, jac=self.lowlevel_jac, t0=t0, q0=[x0, y0, 1, 1], period=self.DELTA_T, rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, args=args, events=self.true_events, method=method)
+        return BohmianOrbit(f=self.lowlevel_odefunc, jac=self.lowlevel_jac, t0=t0, q0=[x0, y0, 1, 1], period=self.DELTA_T, rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, args=args, events=self.true_events, method=method)
 
     def __eq__(self, other):
         if other is self:
@@ -45,14 +64,14 @@ class OrbitCollection:
         for ind, params in zip(np.ndindex(self._orbits.shape), itertools.product(*([arg if hasattr(arg, '__iter__') else [arg] for arg in args]))):
             self._orbits[*ind] = [self.model.get_orbit(*ic, args = tuple((params)), **odeargs) for ic in ics]
 
-    def orbits(self, *index: int)->list[CartesianVariationalOrbit2D]:
+    def orbits(self, *index: int)->list[BohmianOrbit]:
         if not index:
             return self._orbits.flat[0]
         else:
             return self._orbits[*index]
         
     @property
-    def all_orbits(self)->list[CartesianVariationalOrbit2D]:
+    def all_orbits(self)->list[BohmianOrbit]:
         res = []
         for orbits in self._orbits.flat:
             res += orbits
