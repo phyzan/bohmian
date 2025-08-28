@@ -57,7 +57,7 @@ class QuantumOscillator(SolvedPotential):
         if omega is None:
             omega = tuple(self.nd*[1])
         self.omega = omega
-        self.x0 = tuple([math.sqrt(1/(m*omega[i])) for i in range(self.nd)])
+        self.x0 = tuple([sqrt(1/(m*omega[i])) for i in range(self.nd)])
         self.weight = exp(-Add(*[(self.x[i]/self.x0[i])**2/2 for i in range(self.nd)]))
 
     def phi(self, *n):
@@ -67,8 +67,8 @@ class QuantumOscillator(SolvedPotential):
         coef = 1
         polys = []
         for i in range(self.nd):
-            coef *= 1/math.sqrt(2**n[i]*math.factorial(n[i]))*(math.pi*self.x0[i]**2)**-0.25
-            polys.append(HermitePoly(n[i], self.x[i]).replace({self.x[i]: self.x[i]/self.x0[i]}))
+            coef *= 1/sqrt(2**n[i]*math.factorial(n[i]))*(S.pi*self.x0[i]**2)**Rational(-1, 4)
+            polys.append(HermitePoly(n[i], self.x[i]).subs({self.x[i]: self.x[i]/self.x0[i]}))
         if weight:
             return Mul(coef, *polys, self.weight)
         else:
@@ -266,9 +266,8 @@ class Bohmian2D(VectorField2D):
         self.box = box
         self.rmax = rmax
         self.Nsub=Nsub
-        self.args = args
 
-        VectorField2D.__init__(self, xdot, ydot, x, y, self.tvar)
+        VectorField2D.__init__(self, xdot, ydot, x, y, self.tvar, *args)
 
     @property
     def psi(self)->Expr:
@@ -376,16 +375,14 @@ class Bohmian2D(VectorField2D):
     
     @cached_property
     def ode_system(self):
-        return OdeSystem(self._odesys_data, self.tvar, [self.xvar, self.yvar], args=self.args)
+        return OdeSystem(self._odesys_data, self.tvar, [self.xvar, self.yvar], args=self.args[1:])
     
     def varode_sys(self, DELTA_T):
         return VariationalBohmianSystem((self.psi, *self._varodesys_data), self.tvar, self.xvar, self.yvar, self.delx, self.dely, self.args, DELTA_T)
     
-    def orbit(self, x0, y0, t0=0., rtol=0, atol=1e-12, min_step=0., max_step=np.inf, first_step=0., args=()):
+    def orbit(self, x0, y0, t0=0., rtol=0, atol=1e-12, min_step=0., max_step=np.inf, first_step=0., args=(), method="RK45"):
         s = self.ode_system
-        return CartesianOrbit2D(s.lowlevel_odefunc, jac=s.lowlevel_jac, t0=t0, q0=np.array([x0, y0]), rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, args=args, method="RK45", no_math_errno=True, events=s.true_events)
+        return LowLevelODE(s.lowlevel_odefunc, jac=s.lowlevel_jac, t0=t0, q0=np.array([x0, y0]), rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, args=args, method=method, events=s.true_events)
     
     def variational_orbit(self, x0, y0, t0=0., rtol=0, atol=1e-12, min_step=0., max_step=np.inf, first_step=0., args=(), DELTA_T=0.05):
         return self.varode_sys(DELTA_T=DELTA_T).get_orbit(x0, y0, t0=t0, rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, args=args)
-    
-
