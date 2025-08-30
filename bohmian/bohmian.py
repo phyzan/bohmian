@@ -7,6 +7,8 @@ from numiphy.symlib.vectorfields import VectorField2D
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.optimize as sciopt
+from scipy.integrate import IntegrationWarning
+import warnings
 from numiphy.odesolvers import *
 from numiphy.symlib.pylambda import ScalarLambdaExpr, VectorLambdaExpr
 from .orbits import *
@@ -299,22 +301,30 @@ class Bohmian2D(VectorField2D):
 
     def node(self, t, *args)->np.ndarray:
         sq = Parallelogram(*self.box)
-        flow = self.flow(sq, t)
-        if abs(flow) < 1e-4:
-            raise ValueError('No indication of vortex within the search limits of the Vector Field.')
-        else:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=IntegrationWarning)
+            flow = self.flow(sq, t)
+
+        error = lambda flow: ArithmeticError(f'No indication of vortex within the search limits of the Vector Field at t = {t}. Flow is {flow}')
+        if abs(flow)>1e-3:
             for _ in range(self.Nsub):
                 sqrs = sq.split()
-
                 for i in range(4):
                     sq = sqrs[i]
-                    flow = self.flow(sq, t)
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore", category=IntegrationWarning)
+                        flow = self.flow(sq, t)
                     if abs(flow) > 1e-4:
                         ri = 0.5*(sq.Lx**2 + sq.Ly**2)**0.5
                         if ri <= self.rmax:
-                            return sciopt.root(self._psi_eqsystem, sq.center, args=(t, *args), jac=self.jacPsi).x
+                            xn, yn = sciopt.root(self._psi_eqsystem, sq.center, args=(t, *args), jac=self.jacPsi).x
+                            return xn, yn
                         else:
                             break
+                    elif i==3:
+                        raise error(flow)
+        else:
+            raise error(flow)
     
     def _grid(self, arrows: int):
         return grids.Uniform1D(*self.box[:2], arrows) * grids.Uniform1D(*self.box[2:], arrows)
