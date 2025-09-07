@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 import math
 from numiphy.findiffs import grids
 from numiphy.symlib.geom import Line2D, Parallelogram
-from numiphy.symlib.vectorfields import VectorField2D
+from numiphy.symlib.vectorfields import ConservativeVectorField2D
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.optimize as sciopt
@@ -14,189 +14,54 @@ from numiphy.symlib.pylambda import ScalarLambdaExpr, VectorLambdaExpr
 from .orbits import *
 
 
-class Hermite:
-
-    def __init__(self, *x: Symbol):
-        self.x = x
-        self.nd = len(x)
-
-    def __call__(self, *n: int):
-        polys = []
-        for i in range(self.nd):
-            polys.append(HermitePoly(n[i], self.x[i]))
-        return Mul(*polys)
-
-
 class SolvedPotential(ABC):
 
     weight: Expr
 
-    def __init__(self, x: tuple[Symbol], m=1.):
+    def __init__(self, x: tuple[Symbol], t: Symbol, m=1, hbar=1):
         self.x = x
         self.nd = len(x)
-        self.t = Symbol('t')
+        self.t = t
         self.m = m
+        self.hbar = hbar
 
     @abstractmethod
-    def phi(*n)->QuantumState:
-        pass
-
-    @abstractmethod
-    def Phi(*n, weight=True)->Expr:
+    def phi(*n, weight=True)->Expr:
         pass
 
     @abstractmethod
     def energy(self, *n)->float:
         pass
+
+    def Phi(self, *n):
+        return self.phi(*n) * exp(-1j*self.energy(*n)*self.t)
         
 
 class QuantumOscillator(SolvedPotential):
-    '''
-    hbar = 1 is assumed
-    '''
-    def __init__(self, x: tuple[Symbol], omega: tuple[float]=None, m=1.):
-        super().__init__(x, m)
-        if omega is None:
-            omega = tuple(self.nd*[1])
-        self.omega = omega
-        self.x0 = tuple([sqrt(1/(m*omega[i])) for i in range(self.nd)])
-        self.weight = exp(-Add(*[(self.x[i]/self.x0[i])**2/2 for i in range(self.nd)]))
 
-    def phi(self, *n):
-        return QuantumState(self, n, 1)
+    def __init__(self, x: tuple[Symbol], t: Symbol, omega: tuple[Symbol], m=1, hbar=1):
+        super().__init__(x, t, m, hbar)
+        self.omega = omega
+        self.x0 = tuple([sqrt(self.hbar/(self.m*omega[i])) for i in range(self.nd)])
+        self.weight = exp(-Add(*[(self.x[i]/self.x0[i])**2/2 for i in range(self.nd)]))
     
-    def Phi(self, *n: int, weight=True):
+    def phi(self, *n: int, weight=True):
         coef = 1
         polys = []
         for i in range(self.nd):
             coef *= 1/sqrt(2**n[i]*math.factorial(n[i]))*(S.pi*self.x0[i]**2)**Rational(-1, 4)
-            polys.append(HermitePoly(n[i], self.x[i]).subs({self.x[i]: self.x[i]/self.x0[i]}))
+            polys.append(HermitePoly(n[i], self.x[i]/self.x0[i]))
         if weight:
             return Mul(coef, *polys, self.weight)
         else:
             return Mul(coef, *polys)
     
     def energy(self, *n):
-        return sum([self.omega[i]*(n[i]+0.5) for i in range(self.nd)])
+        return sum([self.hbar*self.omega[i]*(n[i]+Rational(1, 2)) for i in range(self.nd)])
 
 
-class WaveFunction:
 
-    def __init__(self, qs: list[QuantumState]):
-        self.V = qs[0].V
-        self.qs = tuple(qs)
-        self.norm_coef = math.sqrt(sum([abs(qsi.coef)**2 for qsi in qs]))
-
-    def __repr__(self):
-        return str(self)
-    
-    def __str__(self):
-        return ' + '.join([str(q) for q in self.qs])
-
-    def __add__(self, other: WaveFunction):
-        return _WaveFunction(list(self._all_states()+other._all_states()))
-    
-    def __sub__(self, other: WaveFunction):
-        return self + -other
-    
-    def __neg__(self):
-        return -1*self
-    
-    def __mul__(self, coef):
-        assert coef != 0
-        return _WaveFunction([coef*qsi for qsi in self._all_states()])
-    
-    def __rmul__(self, coef)->WaveFunction:
-        return self * coef
-    
-    def __truediv__(self, num):
-        return 1/num * self
-
-    def _all_states(self):
-        return self.qs
-    
-    def get(self, time=False, norm=True):
-        return Add(*[fi.get_weightfree(time=time) for fi in self.qs]).expand()*self.V.weight/self.norm_coef**norm
-    
-    def ascallable(self, time=False, norm=True):
-        psi = self.get(time=time, norm=norm)
-        return ScalarLambdaExpr(psi, *self.V.x, self.V.t)
-
-
-class QuantumState(WaveFunction):
-
-
-    def __init__(self, V: SolvedPotential, n: tuple[int], coef: float):
-        if coef == 0:
-            raise ValueError('coef must be != 0')
-        self.V = V
-        self.n = n
-        self.coef = coef
-
-    def __mul__(self, coef):
-        assert coef != 0
-        return QuantumState(self.V, self.n, coef*self.coef)
-
-    def _all_states(self):
-        return self,
-
-    def __repr__(self):
-        return f'{self.coef}*|{", ".join([str(i) for i in self.n])}>'
-    
-    def __str__(self):
-        return repr(self)
-
-    def get(self, time=False, norm=True):
-        psi = self.V.Phi(*self.n)
-        if not norm:
-            psi = self.coef*psi
-        if time is False:
-            return psi
-        else:
-            return psi * exp(-1j*self.V.energy(*self.n)*self.V.t)
-
-    def get_weightfree(self, time=False):
-        psi = self.coef*self.V.Phi(*self.n, weight=False)
-        if time is False:
-            return psi
-        else:
-            return psi * exp(-1j*self.V.energy(*self.n)*self.V.t)
-
-
-def _WaveFunction(qs: list[QuantumState]):
-    for q in qs:
-        if q.V is not qs[0].V:
-            raise NotImplementedError('Can only create a Wavefunction comprised of steady states of the same Hamiltonian')
-    V = qs[0].V
-    i = 0
-    while i < len(qs):
-        if len(qs) < 2:
-            break
-        j = i+1
-        while j < len(qs):
-            if qs[j].n == qs[i].n:
-                coef = qs[i].coef + qs[j].coef
-                if coef != 0:
-                    qs[i] = QuantumState(V, qs[i].n, coef)
-                    qs.pop(j)
-                else:
-                    qs.pop(j)
-                    qs.pop(i)
-                    break
-            else:
-                j += 1
-        if j == len(qs):
-            i += 1
-    
-    if not qs:
-        raise ValueError('The Wavefunction is 0')
-    elif len(qs) == 1:
-        return qs[0]
-    else:
-        return WaveFunction(qs)
-
-
-def HermitePoly(n: int, x: Symbol)->Expr:
+def HermitePoly(n: int, x: Expr)->Expr:
     '''
     Hermite Polynomial of the n-th order.
 
@@ -222,7 +87,7 @@ def HermitePoly(n: int, x: Symbol)->Expr:
         return h2.expand()
     
 
-class Bohmian2D(VectorField2D):
+class Bohmian2D:
 
 
     '''
@@ -235,7 +100,7 @@ class Bohmian2D(VectorField2D):
     with fictitious time parameter "s", not t
     '''
 
-    def __init__(self, data: Expr | tuple[Expr, ...], symbols: tuple[Symbol, ...], args: tuple[Symbol, ...] = (), box=[-10., 10., -10, 10.], rmax=1e-2, Nsub=100):
+    def __init__(self, data: Expr | tuple[Expr, ...], symbols: tuple[Symbol, ...], args: tuple[Symbol, ...] = ()):
         var_data: tuple[Expr, ...] = None
         if hasattr(data, '__iter__'):
             data: tuple[Expr, ...] = data
@@ -265,12 +130,12 @@ class Bohmian2D(VectorField2D):
         self.Psi = ScalarLambdaExpr(psi, x, y, self.tvar)
         self.gradPsi = VectorLambdaExpr([psi.diff(x), psi.diff(y)], x, y, self.tvar)
 
-        self.box = box
-        self.rmax = rmax
-        self.Nsub=Nsub
+        self.bohm_field = ConservativeVectorField2D((xdot, ydot), x, y, self.tvar, *args)
 
-        VectorField2D.__init__(self, xdot, ydot, x, y, self.tvar, *args)
-
+    @property
+    def args(self):
+        return self.bohm_field.args[1:]
+    
     @property
     def psi(self)->Expr:
         return self.Psi.expr
@@ -299,100 +164,93 @@ class Bohmian2D(VectorField2D):
         psi = self.Psi(*q, t, *args)
         return [psi.real, psi.imag]
 
-    def node(self, t, *args)->np.ndarray:
-        sq = Parallelogram(*self.box)
+    def node(self, t, args, Nsub = 100, rmax=1e-2, box = [-10, 10, -10, 10])->np.ndarray:
+        sq = Parallelogram(*box)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=IntegrationWarning)
             flow = self.flow(sq, t)
 
         error = lambda flow: ArithmeticError(f'No indication of vortex within the search limits of the Vector Field at t = {t}. Flow is {flow}')
         if abs(flow)>1e-3:
-            for _ in range(self.Nsub):
+            for _ in range(Nsub):
                 sqrs = sq.split()
                 for i in range(4):
                     sq = sqrs[i]
                     with warnings.catch_warnings():
                         warnings.simplefilter("ignore", category=IntegrationWarning)
-                        flow = self.flow(sq, t)
+                        flow = self.flow(sq, t, args)
                     if abs(flow) > 1e-4:
                         ri = 0.5*(sq.Lx**2 + sq.Ly**2)**0.5
-                        if ri <= self.rmax:
+                        if ri <= rmax:
                             xn, yn = sciopt.root(self._psi_eqsystem, sq.center, args=(t, *args), jac=self.jacPsi).x
-                            return xn, yn
+                            return np.array([xn, yn])
                         else:
                             break
                     elif i==3:
                         raise error(flow)
         else:
             raise error(flow)
-    
-    def _grid(self, arrows: int):
-        return grids.Uniform1D(*self.box[:2], arrows) * grids.Uniform1D(*self.box[2:], arrows)
 
-    def xNdot(self, t, dt=1e-3)->list[float|complex]:
-        s1 = self.node(t-dt)
-        s2 = self.node(t+dt)
+    def xNdot(self, t, args=(), dt=1e-3, **kwargs):
+        s1 = self.node(t-dt, args, **kwargs)
+        s2 = self.node(t+dt, args, **kwargs)
         
         xNdot, yNdot = (s2-s1)/(2*dt)
-        return [xNdot, yNdot]
+        return np.array([xNdot, yNdot])
     
     def flow(self, line: Line2D, t, *args):
-        return super().flow(line, t, *args)
+        return self.bohm_field.flow(line, t, *args)
 
     def loop(self, q, r, t, *args):
-        return super().loop(q, r, t, *args)
+        return self.bohm_field.loop(q, r, t, *args)
 
-    def plot(self, t, arrows=30, *args, **kwargs):
-        return super().plot(self._grid(arrows), t, *args, **kwargs)
-    
-    def plot_line(self, line: Line2D, t, arrows=30, n=400, *args, **kwargs):
-        return super().plot_line(line, self._grid(arrows), n, t, *args, **kwargs)
-    
-    def plot_circle(self, q, r, t, arrows=30, n=400, *args, **kwargs):
-        return super().plot_circle(q, r, self._grid(arrows), n, t, *args, **kwargs)
+    def plot(self, grid: grids.Grid, t, args, scaled=False, **kwargs):
+        return self.bohm_field.plot(grid, (t, *args), scaled=scaled, **kwargs)
 
-    def transformed(self, t, dt=1e-3):
-        xN, yN = self.node(t)
-        xNdot, yNdot = self.xNdot(t, dt)
+    def Y_point(self, t, args, x0=0, y0=0):
+        return self.bohm_field.fixed_point(x0, y0, t, args)
+    
+    def X_point(self, t, args=(), x0=0, y0=0, **kwargs):
+        xndot = self.node(t, args, **kwargs)
+        f = lambda q, *args: self.bohm_field.call(q, *args) - xndot
+        return sciopt.root(f, [x0, y0], jac = self.bohm_field.calljac, args=(t, *args)).x
+    
+    def eigen_lines(self, t, x0, y0, s, epsilon=1e-6, safety_dist=1e-5, curve_length=True, rich=False, **kwargs):
+        kwargs['args'] = (t,) + kwargs.get('args', ())
+        return self.bohm_field.eigen_lines(x0, y0, s, epsilon, safety_dist, curve_length, rich, **kwargs)
+
+    def uv_field(self, t, args=(), dt=1e-3, **kwargs):
+        to_sub = {self.args[i]: args[i] for i in range(len(self.args))}
+        xN, yN = self.node(t, args, dt=dt, **kwargs)
+        xNdot, yNdot = self.xNdot(t, args, dt=dt, **kwargs)
         u, v = variables('u, v')
-        Udot = self.x.expr.subs({self.xvar: u+xN, self.yvar: v+yN, self.tvar: t}) - xNdot*1j
-        Vdot = self.y.expr.subs({self.xvar: u+xN, self.yvar: v+yN, self.tvar: t}) - yNdot*1j
-        return VectorField2D(Imag(Udot), Imag(Vdot), u, v, *self.args)
-
-    def Xpoint_linedata(self, t, s, u0=-1., v0=-1., dt=1e-3, h=1e-5, args=(), **odeargs):
-        f = self.transformed(t, dt, *args)
-        u, v = f.fixed_point(u0, v0)
-        p = np.array([u, v])
-        jac = f.Jac(u, v)
-        (lb, lr), (vecb, vecr) = np.linalg.eigh(jac)
-        assert lb < 0 and lr > 0
-        xb1, yb1 = f.streamline(*(p+h*vecb), s, **odeargs)
-        xb2, yb2 = f.streamline(*(p-h*vecb), s, **odeargs)
-
-        xr1, yr1 = f.streamline(*(p+h*vecr), -s, **odeargs)
-        xr2, yr2 = f.streamline(*(p-h*vecr), -s, **odeargs)
-
-        return f, xb1, yb1, xb2, yb2, xr1, yr1, xr2, yr2
-
-    def plot_Xpoint(self, grid: grids.Grid, t, s, u0=-1., v0=-1., dt=1e-3, h=1e-5, args=(), **odeargs):
-        f, xb1, yb1, xb2, yb2, xr1, yr1, xr2, yr2 = self.Xpoint_linedata(t, s, u0, v0, dt, h, args, **odeargs)
-        fig, ax = f.plot(grid)
-        ax.plot(xb1, yb1, color='blue')
-        ax.plot(xb2, yb2, color='blue')
-        ax.plot(xr1, yr1, color='red')
-        ax.plot(xr2, yr2, color='red')
-        return fig, ax
+        Udot = self.bohm_field.x.expr.subs(to_sub).subs({self.xvar: u+xN, self.yvar: v+yN, self.tvar: t}) - xNdot
+        Vdot = self.bohm_field.y.expr.subs(to_sub).subs({self.xvar: u+xN, self.yvar: v+yN, self.tvar: t}) - yNdot
+        return ConservativeVectorField2D([Udot, Vdot], u, v)
     
     @cached_property
     def ode_system(self):
-        return OdeSystem(self._odesys_data, self.tvar, [self.xvar, self.yvar], args=self.args[1:])
+        return OdeSystem(self._odesys_data, self.tvar, [self.xvar, self.yvar], args=self.args)
     
     def varode_sys(self, DELTA_T):
         return VariationalBohmianSystem((self.psi, *self._varodesys_data), self.tvar, self.xvar, self.yvar, self.delx, self.dely, self.args, DELTA_T)
     
     def orbit(self, x0, y0, t0=0., rtol=0, atol=1e-12, min_step=0., max_step=np.inf, first_step=0., args=(), method="RK45"):
         s = self.ode_system
-        return LowLevelODE(s.lowlevel_odefunc, jac=s.lowlevel_jac, t0=t0, q0=np.array([x0, y0]), rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, args=args, method=method, events=s.true_events)
+        return BohmianOrbit(LowLevelODE(s.lowlevel_odefunc, jac=s.lowlevel_jac, t0=t0, q0=np.array([x0, y0]), rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, args=args, method=method, events=s.true_events))
     
     def variational_orbit(self, x0, y0, t0=0., rtol=0, atol=1e-12, min_step=0., max_step=np.inf, first_step=0., args=(), DELTA_T=0.05):
         return self.varode_sys(DELTA_T=DELTA_T).get_orbit(x0, y0, t0=t0, rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, args=args)
+    
+    def as_inspected(self, Npoints: Iterable[tuple[Expr, Expr]], Xpoints: Iterable[tuple[Expr, Expr]], Ypoints:Iterable[tuple[Expr, Expr]]):
+        t, x, y = self.tvar, self.xvar, self.yvar
+        xdot, ydot = self.bohm_field.x, self.bohm_field.y
+        events = []
+        for point_type_name, point_type in zip(['Npoint', 'Xpoint', 'Ypoint'], [Npoints, Xpoints, Ypoints]):
+            for i, point in enumerate(point_type):
+                xp, yp = point
+                xp_dot, yp_dot = xp.diff(t), yp.diff(t)
+                d_dot = (x-xp)*(xdot - xp_dot) + (y-yp)*(ydot - yp_dot) #we should divide by the distance sqrt(...), but we only care about the sign
+                ev = SymbolicEvent(f"{point_type_name}_{i+1}", d_dot, 1, event_tol=1e-20)
+                events.append(ev)
+        return Bohmian2D([xdot, ydot], t, [x, y], args=(), events = events)
