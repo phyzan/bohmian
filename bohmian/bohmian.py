@@ -100,7 +100,7 @@ class Bohmian2D:
     with fictitious time parameter "s", not t
     '''
 
-    def __init__(self, data: Expr | tuple[Expr, ...], symbols: tuple[Symbol, ...], args: tuple[Symbol, ...] = ()):
+    def __init__(self, data: Expr | tuple[Expr, ...], V: Expr, symbols: tuple[Symbol, ...], args: tuple[Symbol, ...] = ()):
         var_data: tuple[Expr, ...] = None
         if hasattr(data, '__iter__'):
             data: tuple[Expr, ...] = data
@@ -113,7 +113,6 @@ class Bohmian2D:
                 var_data = (delx, dely, delxdot, delydot)
             else:
                 raise ValueError("")
-
         else:
             psi: Expr = data
             x, y, t = symbols
@@ -131,6 +130,7 @@ class Bohmian2D:
         self.gradPsi = VectorLambdaExpr([psi.diff(x), psi.diff(y)], x, y, self.tvar)
 
         self.bohm_field = ConservativeVectorField2D((xdot, ydot), x, y, self.tvar, *args)
+        self._V = V
 
     @property
     def args(self):
@@ -139,6 +139,14 @@ class Bohmian2D:
     @property
     def psi(self)->Expr:
         return self.Psi.expr
+    
+    @property
+    def rho(self)->Expr:
+        return Abs(self.psi)**2
+    
+    @property
+    def potential(self):
+        return self._V
     
     @cached_property
     def quantum_potential(self):
@@ -212,7 +220,10 @@ class Bohmian2D:
     
     def X_point(self, t, args=(), x0=0, y0=0, **kwargs):
         xndot = self.node(t, args, **kwargs)
-        f = lambda q, *args: self.bohm_field.call(q, *args) - xndot
+        return self.field_point(xndot, t, args, x0, y0)
+    
+    def field_point(self, value, t, args=(), x0=0, y0=0):
+        f = lambda q, *args: self.bohm_field.call(q, *args) - value
         return sciopt.root(f, [x0, y0], jac = self.bohm_field.calljac, args=(t, *args)).x
     
     def eigen_lines(self, t, x0, y0, s, epsilon=1e-6, safety_dist=1e-5, curve_length=True, rich=False, **kwargs):
@@ -228,6 +239,11 @@ class Bohmian2D:
         Vdot = self.bohm_field.y.expr.subs(to_sub).subs({self.xvar: u+xN, self.yvar: v+yN, self.tvar: t}) - yNdot
         return ConservativeVectorField2D([Udot, Vdot], u, v)
     
+    @property
+    def force_field(self):
+        f = self._V + self.quantum_potential
+        return ConservativeVectorField2D(f, self.xvar, self.yvar, self.tvar, *self.args)
+    
     @cached_property
     def ode_system(self):
         return OdeSystem(self._odesys_data, self.tvar, [self.xvar, self.yvar], args=self.args)
@@ -242,15 +258,3 @@ class Bohmian2D:
     def variational_orbit(self, x0, y0, t0=0., rtol=0, atol=1e-12, min_step=0., max_step=np.inf, first_step=0., args=(), DELTA_T=0.05):
         return self.varode_sys(DELTA_T=DELTA_T).get_orbit(x0, y0, t0=t0, rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, args=args)
     
-    def as_inspected(self, Npoints: Iterable[tuple[Expr, Expr]], Xpoints: Iterable[tuple[Expr, Expr]], Ypoints:Iterable[tuple[Expr, Expr]]):
-        t, x, y = self.tvar, self.xvar, self.yvar
-        xdot, ydot = self.bohm_field.x, self.bohm_field.y
-        events = []
-        for point_type_name, point_type in zip(['Npoint', 'Xpoint', 'Ypoint'], [Npoints, Xpoints, Ypoints]):
-            for i, point in enumerate(point_type):
-                xp, yp = point
-                xp_dot, yp_dot = xp.diff(t), yp.diff(t)
-                d_dot = (x-xp)*(xdot - xp_dot) + (y-yp)*(ydot - yp_dot) #we should divide by the distance sqrt(...), but we only care about the sign
-                ev = SymbolicEvent(f"{point_type_name}_{i+1}", d_dot, 1, event_tol=1e-20)
-                events.append(ev)
-        return Bohmian2D([xdot, ydot], t, [x, y], args=(), events = events)
