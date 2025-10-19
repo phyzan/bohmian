@@ -3,13 +3,12 @@ from abc import ABC, abstractmethod
 import math
 from numiphy.findiffs import grids
 from numiphy.symlib.geom import Line2D, Parallelogram
-from numiphy.symlib.vectorfields import ConservativeVectorField2D
+from odepack import *
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.optimize as sciopt
 from scipy.integrate import IntegrationWarning
 import warnings
-from numiphy.odesolvers import *
 from numiphy.symlib.pylambda import ScalarLambdaExpr, VectorLambdaExpr
 from .orbits import *
 
@@ -253,7 +252,7 @@ class Bohmian2D:
     
     def orbit(self, x0, y0, t0=0., rtol=0, atol=1e-12, min_step=0., max_step=np.inf, first_step=0., args=(), method="RK45"):
         s = self.ode_system
-        return BohmianOrbit(LowLevelODE(s.lowlevel_odefunc, jac=s.lowlevel_jac, t0=t0, q0=np.array([x0, y0]), rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, args=args, method=method, events=s.true_events))
+        return BohmianOrbit(LowLevelODE(s.lowlevel_odefunc, jac=s.lowlevel_jac, t0=t0, q0=np.array([x0, y0]), rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, args=args, method=method))
     
     def variational_orbit(self, x0, y0, t0=0., rtol=0, atol=1e-12, min_step=0., max_step=np.inf, first_step=0., args=(), DELTA_T=0.05):
         return self.varode_sys(DELTA_T=DELTA_T).get_orbit(x0, y0, t0=t0, rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, args=args)

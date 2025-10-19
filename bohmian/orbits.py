@@ -1,7 +1,7 @@
 from __future__ import annotations
 from numiphy.symlib.symcore import *
 from numiphy.toolkit.plotting import *
-from numiphy.odesolvers import *
+from odepack import *
 import itertools
 
 
@@ -56,7 +56,7 @@ class VariationalBohmianSystem(OdeSystem):
         return cls._process_args(obj, [xdot, ydot, delx_dot, dely_dot], t, [x, y, delx, dely], args=args)
 
     def get_orbit(self, x0, y0, t0=0., rtol=0., atol=1e-9, min_step=0, max_step=np.inf, first_step=0, args=(), method="RK45"):
-        return VariationalBohmianOrbit(f=self.lowlevel_odefunc, jac=self.lowlevel_jac, t0=t0, q0=[x0, y0, 1, 1], period=self.DELTA_T, rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, args=args, events=self.true_events, method=method)
+        return VariationalBohmianOrbit(f=self.lowlevel_odefunc, jac=self.lowlevel_jac, t0=t0, q0=[x0, y0, 1, 1], period=self.DELTA_T, rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, args=args, method=method)
 
     def __eq__(self, other):
         if other is self:
@@ -75,14 +75,14 @@ class OrbitCollection:
         for ind, params in zip(np.ndindex(self._orbits.shape), itertools.product(*([arg if hasattr(arg, '__iter__') else [arg] for arg in args]))):
             self._orbits[*ind] = [self.model.get_orbit(*ic, args = tuple((params)), **odeargs) for ic in ics]
 
-    def orbits(self, *index: int)->list[BohmianOrbit]:
+    def orbits(self, *index: int)->list[VariationalBohmianOrbit]:
         if not index:
             return self._orbits.flat[0]
         else:
             return self._orbits[*index]
         
     @property
-    def all_orbits(self)->list[BohmianOrbit]:
+    def all_orbits(self)->list[VariationalBohmianOrbit]:
         res = []
         for orbits in self._orbits.flat:
             res += orbits
@@ -99,8 +99,8 @@ class OrbitCollection:
     def all_good_orbits(self):
         return [orb for orb in self.all_orbits if not orb.is_dead]
     
-    def integrate(self, interval, max_frames=-1, event_options: dict[str, tuple[int, bool]|int]={}, threads=-1, display_progress=False):
-        integrate_all(self.all_orbits, interval=interval, max_frames=max_frames, event_options=event_options, threads=threads, display_progress=display_progress)
+    def integrate(self, interval, max_frames=-1, threads=-1, display_progress=False):
+        integrate_all(self.all_orbits, interval=interval, max_frames=max_frames, threads=threads, display_progress=display_progress)
     
     @property
     def t_lyap(self):
