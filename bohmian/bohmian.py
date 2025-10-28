@@ -81,9 +81,9 @@ def HermitePoly(n: int, x: Expr)->Expr:
     else:
         h0, h1 = S.One, 2*x
         for i in range(2, n+1):
-            h2 = 2*x*h1 - 2*(i-1)*h0
+            h2 = (2*x*h1 - 2*(i-1)*h0).expand()
             h0, h1 = h1, h2
-        return h2.expand()
+        return h2
     
 
 class Bohmian2D:
