@@ -99,7 +99,7 @@ class Bohmian2D:
     with fictitious time parameter "s", not t
     '''
 
-    def __init__(self, data: Expr | tuple[Expr, ...], V: Expr, symbols: tuple[Symbol, ...], args: tuple[Symbol, ...] = ()):
+    def __init__(self, data: Expr | tuple[Expr, ...], V: Expr, symbols: tuple[Symbol, ...], args: tuple[Symbol, ...] = (), module_name: str = None, directory: str = None):
         var_data: tuple[Expr, ...] = None
         if hasattr(data, '__iter__'):
             data: tuple[Expr, ...] = data
@@ -130,6 +130,8 @@ class Bohmian2D:
 
         self.bohm_field = ConservativeVectorField2D((xdot, ydot), x, y, self.tvar, *args)
         self._V = V
+        self._modname = module_name
+        self._dir = directory
 
     @property
     def args(self):
@@ -245,10 +247,10 @@ class Bohmian2D:
     
     @cached_property
     def ode_system(self):
-        return OdeSystem(self._odesys_data, self.tvar, [self.xvar, self.yvar], args=self.args)
+        return OdeSystem(self._odesys_data, self.tvar, [self.xvar, self.yvar], args=self.args, module_name=self._modname, directory=self._dir)
     
     def varode_sys(self, DELTA_T):
-        return VariationalBohmianSystem((self.psi, *self._varodesys_data), self.tvar, self.xvar, self.yvar, self.delx, self.dely, self.args, DELTA_T)
+        return VariationalBohmianSystem((self.psi, *self._varodesys_data), self.tvar, self.xvar, self.yvar, self.delx, self.dely, self.args, DELTA_T, module_name=self._modname, directory=self._dir)
     
     def orbit(self, x0, y0, t0=0., rtol=0, atol=1e-12, min_step=0., max_step=np.inf, first_step=0., args=(), method="DOP853"):
         s = self.ode_system

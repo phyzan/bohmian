@@ -40,7 +40,7 @@ class VariationalBohmianSystem(OdeSystem):
     psi: Expr
     DELTA_T: float
 
-    def __new__(cls, arg1: Expr|tuple[Expr, Expr, Expr, Expr, Expr], t: Symbol, x: Symbol, y: Symbol, delx: Symbol, dely: Symbol, args: Iterable[Symbol], DELTA_T: float)->VariationalBohmianSystem:        
+    def __new__(cls, arg1: Expr|tuple[Expr, Expr, Expr, Expr, Expr], t: Symbol, x: Symbol, y: Symbol, delx: Symbol, dely: Symbol, args: Iterable[Symbol], DELTA_T: float, module_name: str=None, directory: str = None)->VariationalBohmianSystem:
         if hasattr(arg1, '__iter__'):
             psi, xdot, ydot, delx_dot, dely_dot = arg1
         else:
@@ -50,7 +50,7 @@ class VariationalBohmianSystem(OdeSystem):
             delx_dot = xdot.diff(x)*delx + xdot.diff(y)*dely
             dely_dot = ydot.diff(x)*delx + ydot.diff(y)*dely
         
-        obj = object.__new__(cls)
+        obj = CompileTemplate.__new__(cls, module_name=module_name, directory=directory)
         obj.psi = psi
         obj.DELTA_T = DELTA_T
         return cls._process_args(obj, [xdot, ydot, delx_dot, dely_dot], t, [x, y, delx, dely], args=args)
