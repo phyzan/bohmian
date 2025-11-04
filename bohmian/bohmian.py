@@ -11,6 +11,7 @@ from scipy.integrate import IntegrationWarning
 import warnings
 from numiphy.symlib.pylambda import ScalarLambdaExpr, VectorLambdaExpr
 from .orbits import *
+from rootfinder import *
 
 
 class SolvedPotential(ABC):
@@ -99,7 +100,7 @@ class Bohmian2D:
     with fictitious time parameter "s", not t
     '''
 
-    def __init__(self, data: Expr | tuple[Expr, ...], V: Expr, symbols: tuple[Symbol, ...], args: tuple[Symbol, ...] = (), module_name: str = None, directory: str = None):
+    def __init__(self, data: Expr | tuple[Expr, ...], V: Expr, symbols: tuple[Symbol, ...], args: tuple[Symbol, ...] = (), directory: str = None):
         var_data: tuple[Expr, ...] = None
         if hasattr(data, '__iter__'):
             data: tuple[Expr, ...] = data
@@ -125,14 +126,24 @@ class Bohmian2D:
         self.tvar, self.xvar, self.yvar, self.delx, self.dely = t, x, y, delx, dely
         self._odesys_data = xdot, ydot
         self._varodesys_data = xdot, ydot, delxdot, delydot
-        self.Psi = ScalarLambdaExpr(psi, x, y, self.tvar)
-        self.gradPsi = VectorLambdaExpr([psi.diff(x), psi.diff(y)], x, y, self.tvar)
+        self.Psi = ScalarLambdaExpr(psi, x, y, self.tvar, *args)
+        self.gradPsi = VectorLambdaExpr([psi.diff(x), psi.diff(y)], x, y, self.tvar, *args)
 
         self.bohm_field = ConservativeVectorField2D((xdot, ydot), x, y, self.tvar, *args)
         self._V = V
-        self._modname = module_name
-        self._dir = directory
-
+        if directory is not None:
+            self._odesys_modname = 'bohm_sys'
+            self._varodesys_modname = 'var_bohm_sys'
+            self._nodalpoint_modname = 'nodal_point_sys'
+            self._xpoint_bin = 'xpoint_sys'
+            self._dir = directory
+        else:
+            self._odesys_modname = None
+            self._varodesys_modname = None
+            self._nodalpoint_modname = None
+            self._xpoint_bin = None
+            self._dir = directory = None
+    
     @property
     def args(self):
         return self.bohm_field.args[1:]
@@ -200,12 +211,9 @@ class Bohmian2D:
         else:
             raise error(flow)
 
-    def xNdot(self, t, args=(), dt=1e-3, **kwargs):
-        s1 = self.node(t-dt, args, **kwargs)
-        s2 = self.node(t+dt, args, **kwargs)
-        
-        xNdot, yNdot = (s2-s1)/(2*dt)
-        return np.array([xNdot, yNdot])
+    def xNdot(self, t, args=(), **kwargs):
+        xn = self.node(t, args, **kwargs)
+        return self.v_co(t, *xn, *args)
     
     def flow(self, line: Line2D, t, *args):
         return self.bohm_field.flow(line, t, *args)
@@ -216,29 +224,58 @@ class Bohmian2D:
     def plot(self, grid: grids.Grid, t, args, scaled=False, **kwargs):
         return self.bohm_field.plot(grid, (t, *args), scaled=scaled, **kwargs)
 
-    def Y_point(self, t, args, x0=0, y0=0):
-        return self.bohm_field.fixed_point(x0, y0, t, args)
+    def Y_point(self, t, args=(), x0=0, y0=0):
+        return self.bohm_field.fixed_point(x0, y0, (t, *args))
     
     def X_point(self, t, args=(), x0=0, y0=0, **kwargs):
-        xndot = self.node(t, args, **kwargs)
-        return self.field_point(xndot, t, args, x0, y0)
+        return self.field_point(self.xNdot(t, args, **kwargs), t, args, x0, y0)
     
     def field_point(self, value, t, args=(), x0=0, y0=0):
         f = lambda q, *args: self.bohm_field.call(q, *args) - value
-        return sciopt.root(f, [x0, y0], jac = self.bohm_field.calljac, args=(t, *args)).x
+        res = sciopt.root(f, [x0, y0], jac = self.bohm_field.calljac, args=(t, *args))
+        return res.x
     
     def eigen_lines(self, t, x0, y0, s, epsilon=1e-6, safety_dist=1e-5, curve_length=True, rich=False, **kwargs):
         kwargs['args'] = (t,) + kwargs.get('args', ())
         return self.bohm_field.eigen_lines(x0, y0, s, epsilon, safety_dist, curve_length, rich, **kwargs)
 
-    def uv_field(self, t, args=(), dt=1e-3, **kwargs):
+    def uv_field(self, t, args=(), **kwargs):
         to_sub = {self.args[i]: args[i] for i in range(len(self.args))}
-        xN, yN = self.node(t, args, dt=dt, **kwargs)
-        xNdot, yNdot = self.xNdot(t, args, dt=dt, **kwargs)
+        xN, yN = self.node(t, args, **kwargs)
+        xNdot, yNdot = self.xNdot(t, args, **kwargs)
         u, v = variables('u, v')
         Udot = self.bohm_field.x.expr.subs(to_sub).subs({self.xvar: u+xN, self.yvar: v+yN, self.tvar: t}) - xNdot
         Vdot = self.bohm_field.y.expr.subs(to_sub).subs({self.xvar: u+xN, self.yvar: v+yN, self.tvar: t}) - yNdot
         return ConservativeVectorField2D([Udot, Vdot], u, v)
+    
+    @cached_property
+    def _xpoint_sys(self):
+        vx, vy = Dummy('vx'), Dummy('vy')
+        return EquationSystem([self.bohm_field.x.expr - vx, self.bohm_field.y.expr - vy], [self.xvar, self.yvar], (vx, vy, self.tvar, *self.args), self._xpoint_bin, self._dir)
+    
+    def npxpc(self, t_span, rn0, rx0, xtol=1e-13, ftol=1e-13, max_iter=100, max_frames=-1, **odeargs):
+        t0, t = t_span
+        args = odeargs.get('args', ())
+        xn, yn = sciopt.root(self._psi_eqsystem, rn0, args=(t0, *args), jac=self.jacPsi, options=dict(xtol=xtol)).x
+        xn_orb = self.co_orbit(t0, xn, yn, **odeargs).go_to(t, max_frames=max_frames)
+        rx_array = np.zeros_like(xn_orb.q)
+
+        # try and get initial position of X point
+        eq_sys = self._xpoint_sys
+        xn_dot = self.v_co(t0, xn, yn, *args)
+        res = eq_sys.newton_raphson(rx0, args=(*xn_dot, t0, *args), ftol=ftol, xtol=xtol, max_iter = max_iter)
+        if not res.success:
+            raise ValueError(f"npxpc failed to detect initial X point: Iters = {int(res.iters)}, x = {res.root}")        
+        # initial X point found
+        rx_array[0] = res.root
+        for i, (ti, qi) in enumerate(zip(xn_orb.t[1:], xn_orb.q[1:])):
+            xn_dot = self.v_co(ti, *qi, *args)
+            res = eq_sys.newton_raphson(rx_array[i, :], args=(*xn_dot, ti, *args), ftol=ftol, xtol=xtol, max_iter = max_iter)
+            if res.success:
+                rx_array[i+1] = res.root
+            else:
+                return xn_orb.t[:i], xn_orb.q[:i], rx_array[:i]
+        return xn_orb.t, xn_orb.q, rx_array
     
     @property
     def force_field(self):
@@ -247,10 +284,36 @@ class Bohmian2D:
     
     @cached_property
     def ode_system(self):
-        return OdeSystem(self._odesys_data, self.tvar, [self.xvar, self.yvar], args=self.args, module_name=self._modname, directory=self._dir)
+        return OdeSystem(self._odesys_data, self.tvar, [self.xvar, self.yvar], args=self.args, module_name=self._odesys_modname, directory=self._dir)
+    
+    @cached_property
+    def nodal_point_odesys(self):
+        return OdeSystem(self._v_co, self.tvar, [self.xvar, self.yvar], self.args, module_name=self._nodalpoint_modname, directory=self._dir)
+
+    @cached_property
+    def _v_co(self):
+        a = Real(self.psi).diff(self.xvar)
+        b = Real(self.psi).diff(self.yvar)
+        c = Imag(self.psi).diff(self.xvar)
+        d = Imag(self.psi).diff(self.yvar)
+        D = a*d - b*c
+        C_inv = np.array([[d, -b], [-c, a]], dtype=object)
+        vec = np.array([Real(self.psi).diff(self.tvar), Imag(self.psi).diff(self.tvar)], dtype=object)
+        rhs = -C_inv.dot(vec)/D
+        return rhs
+    
+    @cached_property
+    def _v_co_lambdaexpr(self):
+        return VectorLambdaExpr(self._v_co, self.tvar, self.xvar, self.yvar, *self.args)
+    
+    def v_co(self, t, x, y, *args)->np.ndarray:
+        return self._v_co_lambdaexpr(t, x, y, *args)
+    
+    def co_orbit(self, t0, x0, y0, **odeargs):
+        return self.nodal_point_odesys.get(t0, [x0, y0], **odeargs)
     
     def varode_sys(self, DELTA_T):
-        return VariationalBohmianSystem((self.psi, *self._varodesys_data), self.tvar, self.xvar, self.yvar, self.delx, self.dely, self.args, DELTA_T, module_name=self._modname, directory=self._dir)
+        return VariationalBohmianSystem((self.psi, *self._varodesys_data), self.tvar, self.xvar, self.yvar, self.delx, self.dely, self.args, DELTA_T, module_name=self._varodesys_modname, directory=self._dir)
     
     def orbit(self, x0, y0, t0=0., rtol=0, atol=1e-12, min_step=0., max_step=np.inf, first_step=0., args=(), method="DOP853"):
         s = self.ode_system

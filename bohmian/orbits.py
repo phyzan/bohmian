@@ -40,7 +40,7 @@ class VariationalBohmianSystem(OdeSystem):
     psi: Expr
     DELTA_T: float
 
-    def __new__(cls, arg1: Expr|tuple[Expr, Expr, Expr, Expr, Expr], t: Symbol, x: Symbol, y: Symbol, delx: Symbol, dely: Symbol, args: Iterable[Symbol], DELTA_T: float, module_name: str=None, directory: str = None)->VariationalBohmianSystem:
+    def __init__(self, arg1: Expr|tuple[Expr, Expr, Expr, Expr, Expr], t: Symbol, x: Symbol, y: Symbol, delx: Symbol, dely: Symbol, args: Iterable[Symbol], DELTA_T: float, module_name: str=None, directory: str = None)->VariationalBohmianSystem:
         if hasattr(arg1, '__iter__'):
             psi, xdot, ydot, delx_dot, dely_dot = arg1
         else:
@@ -50,10 +50,10 @@ class VariationalBohmianSystem(OdeSystem):
             delx_dot = xdot.diff(x)*delx + xdot.diff(y)*dely
             dely_dot = ydot.diff(x)*delx + ydot.diff(y)*dely
         
-        obj = CompileTemplate.__new__(cls, module_name=module_name, directory=directory)
-        obj.psi = psi
-        obj.DELTA_T = DELTA_T
-        return cls._process_args(obj, [xdot, ydot, delx_dot, dely_dot], t, [x, y, delx, dely], args=args)
+        CompileTemplate.__init__(self, module_name=module_name, directory=directory)
+        self.psi = psi
+        self.DELTA_T = DELTA_T
+        self._process_args([xdot, ydot, delx_dot, dely_dot], t, [x, y, delx, dely], args=args)
 
     def get_orbit(self, x0, y0, t0=0., rtol=0., atol=1e-9, min_step=0, max_step=np.inf, first_step=0, args=(), method="RK45"):
         return VariationalBohmianOrbit(f=self.lowlevel_odefunc, jac=self.lowlevel_jac, t0=t0, q0=[x0, y0, 1, 1], period=self.DELTA_T, rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, args=args, method=method)
