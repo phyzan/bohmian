@@ -136,12 +136,14 @@ class Bohmian2D:
             self._varodesys_modname = 'var_bohm_sys'
             self._nodalpoint_modname = 'nodal_point_sys'
             self._xpoint_bin = 'xpoint_sys'
+            self._nodal_point_algebraic_system_modname = 'nodal_point_alg_sys'
             self._dir = directory
         else:
             self._odesys_modname = None
             self._varodesys_modname = None
             self._nodalpoint_modname = None
             self._xpoint_bin = None
+            self._nodal_point_algebraic_system_modname = None
             self._dir = directory = None
     
     @property
@@ -180,15 +182,15 @@ class Bohmian2D:
         '''
         return [self.gradPsi(*q, t, *args).real, self.gradPsi(*q, t, *args).imag]
 
-    def _psi_eqsystem(self, q, t, *args):
-        psi = self.Psi(*q, t, *args)
-        return [psi.real, psi.imag]
+    @cached_property
+    def node_finder(self):
+        return EquationSystem([Real(self.psi), Imag(self.psi)], [self.xvar, self.yvar], (self.tvar, *self.args), module_name=self._nodal_point_algebraic_system_modname, directory=self._dir)
 
     def node(self, t, args, Nsub = 100, rmax=1e-2, box = [-10, 10, -10, 10])->np.ndarray:
         sq = Parallelogram(*box)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=IntegrationWarning)
-            flow = self.flow(sq, t)
+            flow = self.flow(sq, t, *args)
 
         error = lambda flow: ArithmeticError(f'No indication of vortex within the search limits of the Vector Field at t = {t}. Flow is {flow}')
         if abs(flow)>1e-3:
@@ -198,12 +200,14 @@ class Bohmian2D:
                     sq = sqrs[i]
                     with warnings.catch_warnings():
                         warnings.simplefilter("ignore", category=IntegrationWarning)
-                        flow = self.flow(sq, t, args)
+                        flow = self.flow(sq, t, *args)
                     if abs(flow) > 1e-4:
                         ri = 0.5*(sq.Lx**2 + sq.Ly**2)**0.5
                         if ri <= rmax:
-                            xn, yn = sciopt.root(self._psi_eqsystem, sq.center, args=(t, *args), jac=self.jacPsi).x
-                            return np.array([xn, yn])
+                            res = self.node_finder.newton_raphson(sq.center, (t, *args))
+                            if not res.success:
+                                raise ValueError('Node search failed')
+                            return res.root
                         else:
                             break
                     elif i==3:
@@ -249,19 +253,22 @@ class Bohmian2D:
         return ConservativeVectorField2D([Udot, Vdot], u, v)
     
     @cached_property
-    def _xpoint_sys(self):
+    def field_point_finder(self):
         vx, vy = Dummy('vx'), Dummy('vy')
         return EquationSystem([self.bohm_field.x.expr - vx, self.bohm_field.y.expr - vy], [self.xvar, self.yvar], (vx, vy, self.tvar, *self.args), self._xpoint_bin, self._dir)
     
     def npxpc(self, t_span, rn0, rx0, xtol=1e-13, ftol=1e-13, max_iter=100, max_frames=-1, **odeargs):
         t0, t = t_span
         args = odeargs.get('args', ())
-        xn, yn = sciopt.root(self._psi_eqsystem, rn0, args=(t0, *args), jac=self.jacPsi, options=dict(xtol=xtol)).x
+        res_node_0 = self.node_finder.newton_raphson(rn0, (t0, *args), ftol=1e-14, xtol=1e-14, max_iter=100000)
+        if not res_node_0.success:
+            raise ValueError('Initial node location search failed in npxpc')
+        xn, yn = res_node_0.root
         xn_orb = self.co_orbit(t0, xn, yn, **odeargs).go_to(t, max_frames=max_frames)
         rx_array = np.zeros_like(xn_orb.q)
 
         # try and get initial position of X point
-        eq_sys = self._xpoint_sys
+        eq_sys = self.field_point_finder
         xn_dot = self.v_co(t0, xn, yn, *args)
         res = eq_sys.newton_raphson(rx0, args=(*xn_dot, t0, *args), ftol=ftol, xtol=xtol, max_iter = max_iter)
         if not res.success:
