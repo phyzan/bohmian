@@ -9,6 +9,7 @@ import numpy as np
 import scipy.optimize as sciopt
 from scipy.integrate import IntegrationWarning
 import warnings
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 from numiphy.symlib.pylambda import ScalarLambdaExpr, VectorLambdaExpr
 from .orbits import *
 from rootfinder import *
@@ -257,14 +258,14 @@ class Bohmian2D:
         vx, vy = Dummy('vx'), Dummy('vy')
         return EquationSystem([self.bohm_field.x.expr - vx, self.bohm_field.y.expr - vy], [self.xvar, self.yvar], (vx, vy, self.tvar, *self.args), self._xpoint_bin, self._dir)
     
-    def npxpc(self, t_span, rn0, rx0, xtol=1e-13, ftol=1e-13, max_iter=100, max_frames=-1, **odeargs):
+    def npxpc(self, t_span, rn0, rx0, xtol=1e-13, ftol=1e-13, max_iter=100, t_eval=None, **odeargs):
         t0, t = t_span
         args = odeargs.get('args', ())
         res_node_0 = self.node_finder.newton_raphson(rn0, (t0, *args), ftol=1e-14, xtol=1e-14, max_iter=100000)
         if not res_node_0.success:
             raise ValueError('Initial node location search failed in npxpc')
         xn, yn = res_node_0.root
-        xn_orb = self.co_orbit(t0, xn, yn, **odeargs).go_to(t, max_frames=max_frames)
+        xn_orb = self.co_orbit(t0, xn, yn, **odeargs).go_to(t, t_eval=t_eval)
         rx_array = np.zeros_like(xn_orb.q)
 
         # try and get initial position of X point
@@ -329,3 +330,46 @@ class Bohmian2D:
     def variational_orbit(self, x0, y0, t0=0., rtol=0, atol=1e-12, min_step=0., max_step=np.inf, first_step=0., args=(), DELTA_T=0.05, method='DOP853'):
         return self.varode_sys(DELTA_T=DELTA_T).get_orbit(x0, y0, t0=t0, rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, args=args, method=method)
     
+    def rho_time_averaged(self, spatial_grid: grids.Grid, t_span: tuple[float, float], nt: int, args=()):
+        #declare the integrand
+        f = self.rho.subs({arg: given_arg for (arg, given_arg) in zip(self.args, args)}).lambdify(self.tvar, self.xvar, self.yvar, lib='numpy')
+        t_arr = np.linspace(*t_span, num=nt+1, endpoint=True)
+
+        #declare spatial mesh
+        xmesh = spatial_grid.x_mesh()
+
+        dt = (t_span[1]-t_span[0])/nt
+        total = 0.0
+        buf = []
+        for t in t_arr:
+            val = f(t, *xmesh)
+            buf.append(val)
+            if len(buf) == 3:
+                total += (dt / 3) * (buf[0] + 4*buf[1] + buf[2])
+                buf = [buf[-1]]  # carry over last point
+        return DummyScalarField(total/(t_span[1]-t_span[0]), spatial_grid, self.xvar, self.yvar)
+    
+    def orbit_colormap_data(self, x0, y0, t_span: tuple[float, float], nt: int, max_prints=0, **odeargs)->OdeResult:
+        t0, t = t_span
+        t_eval = np.linspace(t0, t, nt+1, endpoint=True)
+        return self.orbit(x0=x0, y0=y0, t0=t0, **odeargs).go_to(t, t_eval=t_eval, max_prints=max_prints)
+    
+
+def orbit_colormap(x0, y0, xdata, ydata, **hist_args):
+
+    fig, ax = plt.subplots(figsize=(5, 5))
+    ax.set_aspect('equal')
+
+    # Create 2D histogram
+    h, xedges, yedges, im = ax.hist2d(xdata, ydata,**hist_args)
+
+    # Use make_axes_locatable to ensure perfect alignment
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size="5%", pad=0.05)
+
+    # Add colorbar without exceeding the main axis bounds
+    cbar = fig.colorbar(im, cax=cax)
+    cbar.set_label(f'$\\tilde{{\\rho}}(t_0=0, x_0={x0}, y_0={y0})$', labelpad=2)
+    fig.tight_layout(pad=1.2)
+    
+    return fig, ax, cbar
