@@ -13,6 +13,8 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from numiphy.symlib.pylambda import ScalarLambdaExpr, VectorLambdaExpr
 from .orbits import *
 from rootfinder import *
+from mcpy import PDF2D
+from typing import Literal
 
 
 class SolvedPotential(ABC):
@@ -169,6 +171,27 @@ class Bohmian2D:
         R = sqrt(Imag(psi)**2 + Real(psi)**2)
         LR = R.diff(self.xvar, 2) + R.diff(self.yvar, 2)
         return -LR/(2*R)
+    
+    def draw_ics(self, N: int, t: float, xlims: tuple[float, float], ylims: tuple[float, float], args: tuple[float, ...]):
+        rho = self.rho.lambdify(self.xvar, self.yvar, self.tvar, *self.args, lib='math')
+        rho_xy = lambda x, y: rho(x, y, t, *args)
+        pdf = PDF2D(rho_xy, [xlims, ylims])
+        return pdf.draw(N, therm_factor=10)
+    
+    def draw_orbits(self, N: int, t: float, xlims: tuple[float, float], ylims: tuple[float, float], distribution: Literal['Born', 'uniform'] = 'Born', args = (), **odeargs)->list[BohmianOrbit]:
+        if distribution == 'Born':
+            ics = self.draw_ics(N=N, t=t, xlims=xlims, ylims=ylims, args=args)
+        elif distribution == 'uniform':
+            ics = np.random.uniform(xlims, ylims, (N, 2))
+        else:
+            raise ValueError("The 'distribution' parameter may only be 'Born' or 'uniform'.")
+        orbs = [self.orbit(*ic, t0=t, args=args, **odeargs) for ic in ics]
+        return orbs
+    
+    def draw_variational_orbits(self, N: int, t: float, xlims: tuple[float, float], ylims: tuple[float, float], args=(), DELTA_T=0.05, **odeargs)->list[VariationalBohmianOrbit]:
+        ics = self.draw_ics(N=N, t=t, xlims=xlims, ylims=ylims, args=args)
+        orbs = [self.variational_orbit(*ic, t0=t, DELTA_T=DELTA_T, **odeargs) for ic in ics]
+        return orbs
 
     def jacPsi(self, q, t, *args):
         '''
@@ -330,30 +353,95 @@ class Bohmian2D:
     def variational_orbit(self, x0, y0, t0=0., rtol=0, atol=1e-12, min_step=0., max_step=np.inf, first_step=0., args=(), DELTA_T=0.05, method='DOP853'):
         return self.varode_sys(DELTA_T=DELTA_T).get_orbit(x0, y0, t0=t0, rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, args=args, method=method)
     
-    def rho_time_averaged(self, spatial_grid: grids.Grid, t_span: tuple[float, float], nt: int, args=()):
-        #declare the integrand
+    def rho_time_averaged(self, spatial_grid: grids.Grid, t_span: tuple[float, float], nt: int, chunk_size=2, args=()):
+        # Substitute arguments and create a NumPy-callable version f(t, x, y)
         f = self.rho.subs({arg: given_arg for (arg, given_arg) in zip(self.args, args)}).lambdify(self.tvar, self.xvar, self.yvar, lib='numpy')
-        t_arr = np.linspace(*t_span, num=nt+1, endpoint=True)
 
-        #declare spatial mesh
-        xmesh = spatial_grid.x_mesh()
+        # Time array and step size
+        t_arr = np.linspace(*t_span, num=nt + 1, endpoint=True)
+        dt = (t_span[1] - t_span[0]) / nt
 
-        dt = (t_span[1]-t_span[0])/nt
-        total = 0.0
-        buf = []
-        for t in t_arr:
-            val = f(t, *xmesh)
-            buf.append(val)
-            if len(buf) == 3:
-                total += (dt / 3) * (buf[0] + 4*buf[1] + buf[2])
-                buf = [buf[-1]]  # carry over last point
-        return DummyScalarField(total/(t_span[1]-t_span[0]), spatial_grid, self.xvar, self.yvar)
+        # Spatial mesh (x, y)
+        x_axis_points, y_axis_points = spatial_grid.x
+        xmesh, ymesh = np.meshgrid(x_axis_points, y_axis_points, indexing='ij')
+
+        total = np.zeros_like(xmesh, dtype=float)
+        prev = None  # carry-over from previous chunk for Simpson continuity
+
+        # Process in time chunks
+        for i in range(0, len(t_arr), chunk_size):
+            # Time values for this chunk (with overlap if needed)
+            t_chunk = t_arr[i:i + chunk_size]
+
+            # Build broadcastable arrays: shape (chunk_size, nx, ny)
+            T = t_chunk[:, None, None]
+            X = xmesh[None, :, :]
+            Y = ymesh[None, :, :]
+
+            # Evaluate all time slices in one go → shape (chunk_size, nx, ny)
+            vals = f(T, X, Y)
+
+            # If we carried over one value from the previous chunk, prepend it
+            if prev is not None:
+                vals = np.concatenate([prev[None, :, :], vals], axis=0)
+
+            # Apply Simpson’s rule to all complete triples
+            n_triples = (vals.shape[0] - 1) // 2
+            for j in range(n_triples):
+                total += (dt / 3.0) * (vals[2*j] + 4*vals[2*j + 1] + vals[2*j + 2])
+
+            # Keep the last point if there’s an incomplete triple
+            if vals.shape[0] % 2 == 1:
+                prev = vals[-1]
+            else:
+                prev = vals[-2]  # overlap last one for next chunk
+
+        # Normalize by total time span
+        total /= (t_span[1] - t_span[0])
+
+        return DummyScalarField(total, spatial_grid, self.xvar, self.yvar)
+
     
     def orbit_colormap_data(self, x0, y0, t_span: tuple[float, float], nt: int, max_prints=0, **odeargs)->OdeResult:
         t0, t = t_span
         t_eval = np.linspace(t0, t, nt+1, endpoint=True)
         return self.orbit(x0=x0, y0=y0, t0=t0, **odeargs).go_to(t, t_eval=t_eval, max_prints=max_prints)
     
+    def multi_orbit_colormap(self, N: int, t_span: tuple[float, float], nt: int, xlims: tuple[float, float], ylims: tuple[float, float], bins: tuple[int, int], distribution: Literal['Born', 'uniform'] = 'Born', chunks: int = 1, args = (), first_step=0., **odeargs):
+        t0, tmax = t_span
+        orbs = self.draw_orbits(N=N, t=t0, xlims=xlims, ylims=ylims, distribution=distribution, args=args, first_step=first_step, **odeargs)
+        xbins = np.linspace(*xlims, bins[0], endpoint=True)
+        ybins = np.linspace(*ylims, bins[1], endpoint=True)
+
+        #initialize accumulator
+        hist = np.zeros((len(xbins)-1, len(ybins)-1), dtype=np.float64)
+        chunk_interval = (tmax-t0)/chunks
+
+        def data_batches():
+            for k in range(chunks):
+                t_eval = np.linspace(chunk_interval*k, chunk_interval*(k+1), nt//chunks, endpoint=False)
+                for i, orb in enumerate(orbs):
+                    solver = orb.solver()
+                    orbs[i] = self.orbit(*solver.q, t0=solver.t, first_step=solver.stepsize, args=args, **odeargs)
+                integrate_all(orbs, interval=chunk_interval, t_eval=t_eval)
+                xdata, ydata = [np.concatenate([orbi.q.T[0] for orbi in orbs]), np.concatenate([orbi.q.T[1] for orbi in orbs])]
+                yield xdata, ydata
+        
+        for batch in data_batches():
+            h, _, _ = np.histogram2d(*batch, bins=[xbins, ybins])
+            hist += h
+
+        return xbins, ybins, hist
+    
+    def plot_multi_orbit_colormap(self, N: int, t_span: tuple[float, float], nt: int, xlims: tuple[float, float], ylims: tuple[float, float], bins: tuple[int, int], distribution: Literal['Born', 'uniform'] = 'Born', chunks: int = 1, density=True, args = (), first_step=0., rtol=0, atol=1e-8, min_step=0., max_step=np.inf, method='RK45', **plotargs):
+        xbins, ybins, hist = self.multi_orbit_colormap(N=N, t_span=t_span, nt=nt, xlims=xlims, ylims=ylims, bins=bins, distribution=distribution, chunks=chunks, args=args, first_step=first_step, rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, method=method)
+
+        if density:
+            hist /= (hist.sum() * np.outer(np.diff(xbins), np.diff(ybins)))
+
+        grid = grids.Uniform1D(*xlims, bins[0]) * grids.Uniform1D(*ylims, bins[1])
+        fig, ax, cbar = plot(hist, grid, **plotargs)
+        return fig, ax, cbar
 
 def orbit_colormap(x0, y0, xdata, ydata, **hist_args):
 
