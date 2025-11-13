@@ -353,53 +353,91 @@ class Bohmian2D:
     def variational_orbit(self, x0, y0, t0=0., rtol=0, atol=1e-12, min_step=0., max_step=np.inf, first_step=0., args=(), DELTA_T=0.05, method='DOP853'):
         return self.varode_sys(DELTA_T=DELTA_T).get_orbit(x0, y0, t0=t0, rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, args=args, method=method)
     
-    def rho_time_averaged(self, spatial_grid: grids.Grid, t_span: tuple[float, float], nt: int, chunk_size=2, args=()):
-        # Substitute arguments and create a NumPy-callable version f(t, x, y)
-        f = self.rho.subs({arg: given_arg for (arg, given_arg) in zip(self.args, args)}).lambdify(self.tvar, self.xvar, self.yvar, lib='numpy')
+    def rho_time_averaged(
+        self,
+        spatial_grid: grids.Grid,
+        t_span: tuple[float, float],
+        nt: int,
+        chunk_size=2,
+        args=(),
+        threads=-1,
+        device='cpu'
+    ):
+        # ----------------------------
+        # 1. Set threads
+        # ----------------------------
+        if threads == -1:
+            threads = torch.get_num_threads()  # max available
+        torch.set_num_threads(threads)
 
-        # Time array and step size
-        t_arr = np.linspace(*t_span, num=nt + 1, endpoint=True)
+        # ----------------------------
+        # 2. Set device
+        # ----------------------------
+        device = torch.device(device)  # e.g., 'cpu', 'cuda', 'mps' or ROCm 'cuda'
+        
+        # ----------------------------
+        # 3. Create torch-based callable
+        # ----------------------------
+        f = self.rho.subs({arg: given_arg for arg, given_arg in zip(self.args, args)}).lambdify(self.tvar, self.xvar, self.yvar, lib='torch')
+
+        # ----------------------------
+        # 4. Time array and step size
+        # ----------------------------
+        t_arr = torch.linspace(t_span[0], t_span[1], nt + 1, dtype=torch.float64, device=device)
         dt = (t_span[1] - t_span[0]) / nt
 
-        # Spatial mesh (x, y)
+        # ----------------------------
+        # 5. Spatial mesh
+        # ----------------------------
         x_axis_points, y_axis_points = spatial_grid.x
-        xmesh, ymesh = np.meshgrid(x_axis_points, y_axis_points, indexing='ij')
+        xmesh, ymesh = torch.meshgrid(
+            torch.tensor(x_axis_points, dtype=torch.float64, device=device),
+            torch.tensor(y_axis_points, dtype=torch.float64, device=device),
+            indexing='ij'
+        )
 
-        total = np.zeros_like(xmesh, dtype=float)
-        prev = None  # carry-over from previous chunk for Simpson continuity
+        # ----------------------------
+        # 6. Prepare total and carry-over
+        # ----------------------------
+        total = torch.zeros_like(xmesh, dtype=torch.float64, device=device)
+        prev = None
 
-        # Process in time chunks
+        # ----------------------------
+        # 7. Process in time chunks
+        # ----------------------------
         for i in range(0, len(t_arr), chunk_size):
-            # Time values for this chunk (with overlap if needed)
-            t_chunk = t_arr[i:i + chunk_size]
-
-            # Build broadcastable arrays: shape (chunk_size, nx, ny)
-            T = t_chunk[:, None, None]
+            t_chunk = t_arr[i:i + chunk_size].view(-1, 1, 1)  # shape (chunk_size,1,1)
             X = xmesh[None, :, :]
             Y = ymesh[None, :, :]
 
-            # Evaluate all time slices in one go → shape (chunk_size, nx, ny)
-            vals = f(T, X, Y)
+            # Evaluate function (already torch, on the correct device)
 
-            # If we carried over one value from the previous chunk, prepend it
+            vals = f(t_chunk, X, Y)
+
+            # Prepend carry-over if exists
             if prev is not None:
-                vals = np.concatenate([prev[None, :, :], vals], axis=0)
+                vals = torch.cat([prev[None, :, :], vals], dim=0)
 
-            # Apply Simpson’s rule to all complete triples
+            # Simpson's rule over complete triples
             n_triples = (vals.shape[0] - 1) // 2
             for j in range(n_triples):
                 total += (dt / 3.0) * (vals[2*j] + 4*vals[2*j + 1] + vals[2*j + 2])
 
-            # Keep the last point if there’s an incomplete triple
-            if vals.shape[0] % 2 == 1:
-                prev = vals[-1]
-            else:
-                prev = vals[-2]  # overlap last one for next chunk
+            # Keep last point for next chunk
+            prev = vals[-1] if vals.shape[0] % 2 == 1 else vals[-2]
 
-        # Normalize by total time span
+        # ----------------------------
+        # 8. Normalize by total time span
+        # ----------------------------
         total /= (t_span[1] - t_span[0])
 
-        return DummyScalarField(total, spatial_grid, self.xvar, self.yvar)
+        # ----------------------------
+        # 9. Convert back to NumPy for DummyScalarField
+        # ----------------------------
+        return DummyScalarField(total.cpu().numpy(), spatial_grid, self.xvar, self.yvar)
+
+
+
 
     
     def orbit_colormap_data(self, x0, y0, t_span: tuple[float, float], nt: int, max_prints=0, **odeargs)->OdeResult:
