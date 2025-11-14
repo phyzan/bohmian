@@ -481,7 +481,7 @@ class Bohmian2D:
         fig, ax, cbar = plot(hist, grid, **plotargs)
         return fig, ax, cbar
 
-def orbit_colormap(x0, y0, xdata, ydata, **hist_args):
+def orbit_colormap(xdata, ydata, **hist_args):
 
     fig, ax = plt.subplots(figsize=(5, 5))
     ax.set_aspect('equal')
@@ -495,7 +495,7 @@ def orbit_colormap(x0, y0, xdata, ydata, **hist_args):
 
     # Add colorbar without exceeding the main axis bounds
     cbar = fig.colorbar(im, cax=cax)
-    cbar.set_label(f'$\\tilde{{\\rho}}(t_0=0, x_0={x0}, y_0={y0})$', labelpad=2)
+    cbar.set_label(f'$\\tilde{{\\rho}}$', labelpad=2)
     fig.tight_layout(pad=1.2)
     
     return fig, ax, cbar
