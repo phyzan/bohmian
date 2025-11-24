@@ -2,11 +2,14 @@ from __future__ import annotations
 from numiphy.symlib.symcore import *
 from numiphy.toolkit.plotting import *
 from odepack import *
-import itertools
-from .bohmian import *
+from odepack.odesolvers_base import *
+from odepack.symode import _get_cls_instance
+from typing import TypeVar
+import mpmath
 
+T = TypeVar('T')
 
-class BohmianOrbit(LowLevelODE):
+class _BohmianOrbit(AbstractLowLevelODE[T]):
 
     @property
     def x(self):
@@ -16,8 +19,20 @@ class BohmianOrbit(LowLevelODE):
     def y(self):
         return self.q[:, 1]
     
+class BohmianOrbit_Double(LowLevelODE_Double, _BohmianOrbit[np.float64]):
+    pass
 
-class VariationalBohmianOrbit(VariationalLowLevelODE):
+class BohmianOrbit_Float(LowLevelODE_Float, _BohmianOrbit[np.float32]):
+    pass
+
+class BohmianOrbit_LongDouble(LowLevelODE_LongDouble, _BohmianOrbit[np.longdouble]):
+    pass
+
+class BohmianOrbit_MpReal(LowLevelODE_MpReal, _BohmianOrbit[mpmath.mpf]):
+    pass
+    
+
+class _VariationalBohmianOrbit(AbstractVariationalLowLevelODE[T]):
     
     @property
     def x(self):
@@ -36,12 +51,36 @@ class VariationalBohmianOrbit(VariationalLowLevelODE):
         return self.q[:, 3]
 
 
+class VariationalBohmianOrbit_Double(VariationalLowLevelODE_Double, _VariationalBohmianOrbit[np.float64]):
+    pass
+
+class VariationalBohmianOrbit_Float(VariationalLowLevelODE_Float, _VariationalBohmianOrbit[np.float32]):
+    pass
+
+class VariationalBohmianOrbit_LongDouble(VariationalLowLevelODE_LongDouble, _VariationalBohmianOrbit[np.longdouble]):
+    pass
+
+class VariationalBohmianOrbit_MpReal(VariationalLowLevelODE_MpReal, _VariationalBohmianOrbit[mpmath.mpf]):
+    pass
+
+
+AnyBohmianOrbit: TypeAlias = Union[BohmianOrbit_Double, BohmianOrbit_Float, BohmianOrbit_LongDouble, BohmianOrbit_MpReal]
+AnyVariationalBohmianOrbit: TypeAlias = Union[VariationalBohmianOrbit_Double, VariationalBohmianOrbit_Float, VariationalBohmianOrbit_LongDouble, VariationalBohmianOrbit_MpReal]
+
+
+def BohmianOrbit(*args, dtype='double', **kwargs)->AnyBohmianOrbit:
+    return _get_cls_instance('BohmianOrbit', dtype=dtype, *args, **kwargs)
+
+def VariationalBohmianOrbit(*args, dtype='double', **kwargs)->AnyVariationalBohmianOrbit:
+    return _get_cls_instance('VariationalBohmianOrbit', dtype=dtype, *args, **kwargs)
+
+
 class VariationalBohmianSystem(OdeSystem):
 
     psi: Expr
     DELTA_T: float
 
-    def __init__(self, arg1: Expr|tuple[Expr, Expr, Expr, Expr, Expr], t: Symbol, x: Symbol, y: Symbol, delx: Symbol, dely: Symbol, args: Iterable[Symbol], DELTA_T: float, module_name: str=None, directory: str = None)->VariationalBohmianSystem:
+    def __init__(self, arg1: Expr|tuple[Expr, Expr, Expr, Expr, Expr], t: Symbol, x: Symbol, y: Symbol, delx: Symbol, dely: Symbol, args: Iterable[Symbol], DELTA_T: float, module_name: str=None, directory: str = None):
         if hasattr(arg1, '__iter__'):
             psi, xdot, ydot, delx_dot, dely_dot = arg1
         else:
@@ -51,13 +90,12 @@ class VariationalBohmianSystem(OdeSystem):
             delx_dot = xdot.diff(x)*delx + xdot.diff(y)*dely
             dely_dot = ydot.diff(x)*delx + ydot.diff(y)*dely
         
-        CompileTemplate.__init__(self, module_name=module_name, directory=directory)
         self.psi = psi
         self.DELTA_T = DELTA_T
-        self._process_args([xdot, ydot, delx_dot, dely_dot], t, [x, y, delx, dely], args=args)
+        OdeSystem.__init__(self, [xdot, ydot, delx_dot, dely_dot], t, [x, y, delx, dely], args=args, directory=directory, module_name=module_name)
 
-    def get_orbit(self, x0, y0, t0=0., rtol=0., atol=1e-9, min_step=0, max_step=np.inf, first_step=0, args=(), method="RK45"):
-        return VariationalBohmianOrbit(f=self.lowlevel_odefunc, jac=self.lowlevel_jac, t0=t0, q0=[x0, y0, 1, 1], period=self.DELTA_T, rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, args=args, method=method)
+    def get_orbit(self, x0, y0, t0=0., rtol=0., atol=1e-9, min_step=0, max_step=np.inf, first_step=0, args=(), method="RK45", dtype='double'):
+        return VariationalBohmianOrbit(f=self.lowlevel_odefunc(dtype), jac=self.lowlevel_jac(dtype), t0=t0, q0=[x0, y0, 1, 1], period=self.DELTA_T, rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, args=args, method=method, dtype=dtype)
 
     def __eq__(self, other):
         if other is self:
@@ -67,76 +105,3 @@ class VariationalBohmianSystem(OdeSystem):
         else:
             return False
 
-
-class OrbitCollection:
-
-    def __init__(self, bf: Bohmian2D, N: int, xlims, ylims, args = (), DELTA_T = 0.05, **odeargs):
-        self.model = bf.varode_sys(DELTA_T=DELTA_T)
-        self._orbits = np.empty(shape = [len(x) if hasattr(x, '__iter__') else 1 for x in args], dtype=object)
-        for ind, params in zip(np.ndindex(self._orbits.shape), itertools.product(*([arg if hasattr(arg, '__iter__') else [arg] for arg in args]))):
-            ics = bf.draw_ics(N=N, t=0, xlims=xlims, ylims=ylims, args=params)
-            self._orbits[*ind] = [self.model.get_orbit(*ic, t0=0, args=params, **odeargs) for ic in ics]
-
-    def orbits(self, *index: int)->list[VariationalBohmianOrbit]:
-        if not index:
-            return self._orbits.flat[0]
-        else:
-            return self._orbits[*index]
-        
-    @property
-    def all_orbits(self)->list[VariationalBohmianOrbit]:
-        res = []
-        for orbits in self._orbits.flat:
-            res += orbits
-        return res
-    
-    @property
-    def DELTA_T(self):
-        return self.model.DELTA_T
-    
-    def good_orbits(self, *index):
-        return [orb for orb in self.orbits(*index) if not orb.is_dead]
-    
-    @property
-    def all_good_orbits(self):
-        return [orb for orb in self.all_orbits if not orb.is_dead]
-    
-    def integrate(self, interval, t_eval=None, threads=-1, event_options=(), display_progress=False):
-        integrate_all(self.all_orbits, interval=interval, event_options=event_options, t_eval=t_eval, threads=threads, display_progress=display_progress)
-    
-    @property
-    def t_lyap(self):
-        for orb in self.all_orbits:
-            if not orb.is_dead:
-                return orb.t_lyap
-        raise ValueError('')
-    
-    @property
-    def lyap_all(self):
-        return np.array([orb.lyap for orb in self.all_good_orbits])
-    
-    
-    def lyap(self, l=0.005, *index):
-        res = np.array([orb.lyap for orb in self.good_orbits(*index)])
-        return res[abs(res)[:, -1]>l]
-    
-    def lyap_mean(self, l=0.005, *index):
-        return np.mean(self.lyap(l, *index), axis=0)
-    
-    def lyap_std(self, l=0.005, *index):
-        return np.std(self.lyap(l, *index), axis=0)
-    
-    def lyap_mean_error(self, l=0.005, *index):
-        sample = self.lyap(l, *index)
-        std = np.std(sample, axis=0)
-        return std/np.sqrt(sample.shape[0]-1)
-    
-    def hist(self, l=0.005, index=(), i=-1, bins=10, range=None, density=None, weights=None):
-        data = self.lyap(l, *index)
-        hist_data, bin_edges = np.histogram(data[:, i], bins, range, density, weights)
-        return bin_edges[1:]+np.diff(bin_edges)/2, hist_data
-    
-    def data(self, l=0.005, *index):
-        lyap = self.lyap(l, *index)
-        err = self.lyap_mean_error(l, *index)
-        return self.t_lyap, lyap, err

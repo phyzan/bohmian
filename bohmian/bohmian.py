@@ -12,6 +12,7 @@ import warnings
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from numiphy.symlib.pylambda import ScalarLambdaExpr, VectorLambdaExpr
 from .orbits import *
+from .orbits import VariationalBohmianSystem
 from rootfinder import *
 from mcpy import PDF2D
 from typing import Literal
@@ -148,6 +149,8 @@ class Bohmian2D:
             self._xpoint_bin = None
             self._nodal_point_algebraic_system_modname = None
             self._dir = directory = None
+
+        self._cached_var_ode_sys: dict[float, VariationalBohmianSystem] = {}
     
     @property
     def args(self):
@@ -178,20 +181,20 @@ class Bohmian2D:
         pdf = PDF2D(rho_xy, [xlims, ylims])
         return pdf.draw(N, therm_factor=10)
     
-    def draw_orbits(self, N: int, t: float, xlims: tuple[float, float], ylims: tuple[float, float], distribution: Literal['Born', 'uniform'] = 'Born', args = (), **odeargs)->list[BohmianOrbit]:
+    def draw_orbits(self, N: int, t: float, xlims: tuple[float, float], ylims: tuple[float, float], distribution: Literal['Born', 'uniform'] = 'Born', args = (), dtype='double', **odeargs)->list[AnyBohmianOrbit]:
         if distribution == 'Born':
             ics = self.draw_ics(N=N, t=t, xlims=xlims, ylims=ylims, args=args)
         elif distribution == 'uniform':
             ics = np.random.uniform(xlims, ylims, (N, 2))
         else:
             raise ValueError("The 'distribution' parameter may only be 'Born' or 'uniform'.")
-        orbs = [self.orbit(*ic, t0=t, args=args, **odeargs) for ic in ics]
+        orbs = [self.orbit(*ic, t0=t, args=args, dtype=dtype, **odeargs) for ic in ics]
         return orbs
     
-    def draw_variational_orbits(self, N: int, t: float, xlims: tuple[float, float], ylims: tuple[float, float], args=(), DELTA_T=0.05, **odeargs)->list[VariationalBohmianOrbit]:
+    def draw_variational_orbits(self, N: int, t: float, xlims: tuple[float, float], ylims: tuple[float, float], args=(), DELTA_T=0.05, dtype='double', **odeargs)->list[AnyVariationalBohmianOrbit]:
         ics = self.draw_ics(N=N, t=t, xlims=xlims, ylims=ylims, args=args)
         model = self.varode_sys(DELTA_T=DELTA_T)
-        return [model.get_orbit(*ic, t0=t, args=args, **odeargs) for ic in ics]
+        return [model.get_orbit(*ic, t0=t, args=args, dtype=dtype, **odeargs) for ic in ics]
     
     def jacPsi(self, q, t, *args):
         '''
@@ -346,12 +349,15 @@ class Bohmian2D:
     def varode_sys(self, DELTA_T):
         return VariationalBohmianSystem((self.psi, *self._varodesys_data), self.tvar, self.xvar, self.yvar, self.delx, self.dely, self.args, DELTA_T, module_name=self._varodesys_modname, directory=self._dir)
     
-    def orbit(self, x0, y0, t0=0., rtol=0, atol=1e-12, min_step=0., max_step=np.inf, first_step=0., args=(), method="DOP853"):
+    def orbit(self, x0, y0, t0=0., rtol=0, atol=1e-12, min_step=0., max_step=np.inf, first_step=0., args=(), method="RK45", dtype='double'):
         s = self.ode_system
-        return BohmianOrbit(LowLevelODE(s.lowlevel_odefunc, jac=s.lowlevel_jac, t0=t0, q0=np.array([x0, y0]), rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, args=args, method=method))
+        return BohmianOrbit(LowLevelODE(s.lowlevel_odefunc(dtype=dtype), jac=s.lowlevel_jac(dtype=dtype), t0=t0, q0=np.array([x0, y0]), rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, args=args, method=method), dtype=dtype)
     
-    def variational_orbit(self, x0, y0, t0=0., rtol=0, atol=1e-12, min_step=0., max_step=np.inf, first_step=0., args=(), DELTA_T=0.05, method='DOP853'):
-        return self.varode_sys(DELTA_T=DELTA_T).get_orbit(x0, y0, t0=t0, rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, args=args, method=method)
+    def variational_orbit(self, x0, y0, t0=0., rtol=0, atol=1e-12, min_step=0., max_step=np.inf, first_step=0., args=(), DELTA_T=0.05, method='RK45', dtype='double'):
+        if DELTA_T not in self._cached_var_ode_sys:
+            self._cached_var_ode_sys[DELTA_T] = self.varode_sys(DELTA_T=DELTA_T)
+        
+        return self._cached_var_ode_sys[DELTA_T].get_orbit(x0, y0, t0=t0, rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, args=args, method=method, dtype=dtype)
     
     def rho_time_averaged(
         self,
@@ -435,19 +441,15 @@ class Bohmian2D:
         # 9. Convert back to NumPy for DummyScalarField
         # ----------------------------
         return DummyScalarField(total.cpu().numpy(), spatial_grid, self.xvar, self.yvar)
-
-
-
-
     
-    def orbit_colormap_data(self, x0, y0, t_span: tuple[float, float], nt: int, max_prints=0, **odeargs)->OdeResult:
+    def orbit_colormap_data(self, x0, y0, t_span: tuple[float, float], nt: int, max_prints=0, dtype='double', **odeargs)->OdeResult:
         t0, t = t_span
         t_eval = np.linspace(t0, t, nt+1, endpoint=True)
-        return self.orbit(x0=x0, y0=y0, t0=t0, **odeargs).go_to(t, t_eval=t_eval, max_prints=max_prints)
+        return self.orbit(x0=x0, y0=y0, t0=t0, dtype=dtype, **odeargs).go_to(t, t_eval=t_eval, max_prints=max_prints)
     
-    def multi_orbit_colormap(self, N: int, t_span: tuple[float, float], nt: int, xlims: tuple[float, float], ylims: tuple[float, float], bins: tuple[int, int], distribution: Literal['Born', 'uniform'] = 'Born', chunks: int = 1, args = (), first_step=0., **odeargs):
+    def multi_orbit_colormap(self, N: int, t_span: tuple[float, float], nt: int, xlims: tuple[float, float], ylims: tuple[float, float], bins: tuple[int, int], distribution: Literal['Born', 'uniform'] = 'Born', chunks: int = 1, args = (), first_step=0., dtype='double', **odeargs):
         t0, tmax = t_span
-        orbs = self.draw_orbits(N=N, t=t0, xlims=xlims, ylims=ylims, distribution=distribution, args=args, first_step=first_step, **odeargs)
+        orbs = self.draw_orbits(N=N, t=t0, xlims=xlims, ylims=ylims, distribution=distribution, args=args, first_step=first_step, dtype=dtype, **odeargs)
         xbins = np.linspace(*xlims, bins[0], endpoint=True)
         ybins = np.linspace(*ylims, bins[1], endpoint=True)
 
@@ -460,7 +462,7 @@ class Bohmian2D:
                 t_eval = np.linspace(chunk_interval*k, chunk_interval*(k+1), nt//chunks, endpoint=False)
                 for i, orb in enumerate(orbs):
                     solver = orb.solver()
-                    orbs[i] = self.orbit(*solver.q, t0=solver.t, first_step=solver.stepsize, args=args, **odeargs)
+                    orbs[i] = self.orbit(*solver.q, t0=solver.t, first_step=solver.stepsize, args=args, dtype=dtype, **odeargs)
                 integrate_all(orbs, interval=chunk_interval, t_eval=t_eval)
                 xdata, ydata = [np.concatenate([orbi.q.T[0] for orbi in orbs]), np.concatenate([orbi.q.T[1] for orbi in orbs])]
                 yield xdata, ydata
@@ -471,8 +473,8 @@ class Bohmian2D:
 
         return xbins, ybins, hist
     
-    def plot_multi_orbit_colormap(self, N: int, t_span: tuple[float, float], nt: int, xlims: tuple[float, float], ylims: tuple[float, float], bins: tuple[int, int], distribution: Literal['Born', 'uniform'] = 'Born', chunks: int = 1, density=True, args = (), first_step=0., rtol=0, atol=1e-8, min_step=0., max_step=np.inf, method='RK45', **plotargs):
-        xbins, ybins, hist = self.multi_orbit_colormap(N=N, t_span=t_span, nt=nt, xlims=xlims, ylims=ylims, bins=bins, distribution=distribution, chunks=chunks, args=args, first_step=first_step, rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, method=method)
+    def plot_multi_orbit_colormap(self, N: int, t_span: tuple[float, float], nt: int, xlims: tuple[float, float], ylims: tuple[float, float], bins: tuple[int, int], distribution: Literal['Born', 'uniform'] = 'Born', chunks: int = 1, density=True, args = (), first_step=0., rtol=0, atol=1e-8, min_step=0., max_step=np.inf, method='RK45', dtype='double', **plotargs):
+        xbins, ybins, hist = self.multi_orbit_colormap(N=N, t_span=t_span, nt=nt, xlims=xlims, ylims=ylims, bins=bins, distribution=distribution, chunks=chunks, args=args, first_step=first_step, rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, method=method, dtype=dtype)
 
         if density:
             hist /= (hist.sum() * np.outer(np.diff(xbins), np.diff(ybins)))
