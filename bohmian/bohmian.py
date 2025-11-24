@@ -175,24 +175,24 @@ class Bohmian2D:
         LR = R.diff(self.xvar, 2) + R.diff(self.yvar, 2)
         return -LR/(2*R)
     
-    def draw_ics(self, N: int, t: float, xlims: tuple[float, float], ylims: tuple[float, float], args: tuple[float, ...]):
-        rho = self.rho.lambdify(self.xvar, self.yvar, self.tvar, *self.args, lib='math')
-        rho_xy = lambda x, y: rho(x, y, t, *args)
-        pdf = PDF2D(rho_xy, [xlims, ylims])
-        return pdf.draw(N, therm_factor=10)
+    def draw_ics(self, N: int, t: float, xlims: tuple[float, float], ylims: tuple[float, float], args: tuple[float, ...], distribution='Born'):
+        if distribution=='Born':
+            rho = self.rho.lambdify(self.xvar, self.yvar, self.tvar, *self.args, lib='math')
+            rho_xy = lambda x, y: rho(x, y, t, *args)
+            pdf = PDF2D(rho_xy, [xlims, ylims])
+            return pdf.draw(N, therm_factor=10)
+        elif distribution == 'uniform':
+            return np.random.uniform(xlims, ylims, (N, 2))
+        else:
+            raise NotImplementedError
     
     def draw_orbits(self, N: int, t: float, xlims: tuple[float, float], ylims: tuple[float, float], distribution: Literal['Born', 'uniform'] = 'Born', args = (), dtype='double', **odeargs)->list[AnyBohmianOrbit]:
-        if distribution == 'Born':
-            ics = self.draw_ics(N=N, t=t, xlims=xlims, ylims=ylims, args=args)
-        elif distribution == 'uniform':
-            ics = np.random.uniform(xlims, ylims, (N, 2))
-        else:
-            raise ValueError("The 'distribution' parameter may only be 'Born' or 'uniform'.")
+        ics =self.draw_ics(N=N, t=t, xlims=xlims, ylims=ylims, args=args, distribution=distribution)
         orbs = [self.orbit(*ic, t0=t, args=args, dtype=dtype, **odeargs) for ic in ics]
         return orbs
     
-    def draw_variational_orbits(self, N: int, t: float, xlims: tuple[float, float], ylims: tuple[float, float], args=(), DELTA_T=0.05, dtype='double', **odeargs)->list[AnyVariationalBohmianOrbit]:
-        ics = self.draw_ics(N=N, t=t, xlims=xlims, ylims=ylims, args=args)
+    def draw_variational_orbits(self, N: int, t: float, xlims: tuple[float, float], ylims: tuple[float, float], distribution: Literal['Born', 'uniform'] = 'Born', args=(), DELTA_T=0.05, dtype='double', **odeargs)->list[AnyVariationalBohmianOrbit]:
+        ics = self.draw_ics(N=N, t=t, xlims=xlims, ylims=ylims, args=args, distribution=distribution)
         model = self.varode_sys(DELTA_T=DELTA_T)
         return [model.get_orbit(*ic, t0=t, args=args, dtype=dtype, **odeargs) for ic in ics]
     
