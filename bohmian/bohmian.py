@@ -190,9 +190,9 @@ class Bohmian2D:
     
     def draw_variational_orbits(self, N: int, t: float, xlims: tuple[float, float], ylims: tuple[float, float], args=(), DELTA_T=0.05, **odeargs)->list[VariationalBohmianOrbit]:
         ics = self.draw_ics(N=N, t=t, xlims=xlims, ylims=ylims, args=args)
-        orbs = [self.variational_orbit(*ic, t0=t, DELTA_T=DELTA_T, **odeargs) for ic in ics]
-        return orbs
-
+        model = self.varode_sys(DELTA_T=DELTA_T)
+        return [model.get_orbit(*ic, t0=t, args=args, **odeargs) for ic in ics]
+    
     def jacPsi(self, q, t, *args):
         '''
         Construct the Jacobian of the wavefunction as a python callable.

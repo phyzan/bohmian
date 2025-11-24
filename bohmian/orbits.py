@@ -3,6 +3,7 @@ from numiphy.symlib.symcore import *
 from numiphy.toolkit.plotting import *
 from odepack import *
 import itertools
+from .bohmian import *
 
 
 class BohmianOrbit(LowLevelODE):
@@ -69,11 +70,12 @@ class VariationalBohmianSystem(OdeSystem):
 
 class OrbitCollection:
 
-    def __init__(self, model: VariationalBohmianSystem, ics: Iterable[tuple[float, float]], args = (), **odeargs):
-        self.model = model
+    def __init__(self, bf: Bohmian2D, N: int, xlims, ylims, args = (), DELTA_T = 0.05, **odeargs):
+        self.model = bf.varode_sys(DELTA_T=DELTA_T)
         self._orbits = np.empty(shape = [len(x) if hasattr(x, '__iter__') else 1 for x in args], dtype=object)
         for ind, params in zip(np.ndindex(self._orbits.shape), itertools.product(*([arg if hasattr(arg, '__iter__') else [arg] for arg in args]))):
-            self._orbits[*ind] = [self.model.get_orbit(*ic, args = tuple((params)), **odeargs) for ic in ics]
+            ics = bf.draw_ics(N=N, t=0, xlims=xlims, ylims=ylims, args=params)
+            self._orbits[*ind] = [self.model.get_orbit(*ic, t0=0, args=params, **odeargs) for ic in ics]
 
     def orbits(self, *index: int)->list[VariationalBohmianOrbit]:
         if not index:
