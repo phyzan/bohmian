@@ -2,14 +2,10 @@ from __future__ import annotations
 from numiphy.symlib.symcore import *
 from numiphy.toolkit.plotting import *
 from odepack import *
-from odepack.odesolvers_base import *
-from odepack.symode import _get_cls_instance
-from typing import TypeVar
 import mpmath
 
-T = TypeVar('T')
 
-class _BohmianOrbit(AbstractLowLevelODE[T]):
+class BohmianOrbit(LowLevelODE):
 
     @property
     def x(self):
@@ -18,21 +14,8 @@ class _BohmianOrbit(AbstractLowLevelODE[T]):
     @property
     def y(self):
         return self.q[:, 1]
-    
-class BohmianOrbit_Double(LowLevelODE_Double, _BohmianOrbit[np.float64]):
-    pass
 
-class BohmianOrbit_Float(LowLevelODE_Float, _BohmianOrbit[np.float32]):
-    pass
-
-class BohmianOrbit_LongDouble(LowLevelODE_LongDouble, _BohmianOrbit[np.longdouble]):
-    pass
-
-class BohmianOrbit_MpReal(LowLevelODE_MpReal, _BohmianOrbit[mpmath.mpf]):
-    pass
-    
-
-class _VariationalBohmianOrbit(AbstractVariationalLowLevelODE[T]):
+class VariationalBohmianOrbit(VariationalLowLevelODE):
     
     @property
     def x(self):
@@ -49,30 +32,6 @@ class _VariationalBohmianOrbit(AbstractVariationalLowLevelODE[T]):
     @property
     def dely(self):
         return self.q[:, 3]
-
-
-class VariationalBohmianOrbit_Double(VariationalLowLevelODE_Double, _VariationalBohmianOrbit[np.float64]):
-    pass
-
-class VariationalBohmianOrbit_Float(VariationalLowLevelODE_Float, _VariationalBohmianOrbit[np.float32]):
-    pass
-
-class VariationalBohmianOrbit_LongDouble(VariationalLowLevelODE_LongDouble, _VariationalBohmianOrbit[np.longdouble]):
-    pass
-
-class VariationalBohmianOrbit_MpReal(VariationalLowLevelODE_MpReal, _VariationalBohmianOrbit[mpmath.mpf]):
-    pass
-
-
-AnyBohmianOrbit: TypeAlias = Union[BohmianOrbit_Double, BohmianOrbit_Float, BohmianOrbit_LongDouble, BohmianOrbit_MpReal]
-AnyVariationalBohmianOrbit: TypeAlias = Union[VariationalBohmianOrbit_Double, VariationalBohmianOrbit_Float, VariationalBohmianOrbit_LongDouble, VariationalBohmianOrbit_MpReal]
-
-
-def BohmianOrbit(*args, dtype='double', **kwargs)->AnyBohmianOrbit:
-    return _get_cls_instance('BohmianOrbit', dtype=dtype, *args, **kwargs)
-
-def VariationalBohmianOrbit(*args, dtype='double', **kwargs)->AnyVariationalBohmianOrbit:
-    return _get_cls_instance('VariationalBohmianOrbit', dtype=dtype, *args, **kwargs)
 
 
 class VariationalBohmianSystem(OdeSystem):

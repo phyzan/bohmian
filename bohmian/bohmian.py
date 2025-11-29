@@ -12,7 +12,6 @@ import warnings
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from numiphy.symlib.pylambda import ScalarLambdaExpr, VectorLambdaExpr
 from .orbits import *
-from .orbits import VariationalBohmianSystem
 from rootfinder import *
 from mcpy import PDF2D
 from typing import Literal
@@ -186,12 +185,12 @@ class Bohmian2D:
         else:
             raise NotImplementedError
     
-    def draw_orbits(self, N: int, t: float, xlims: tuple[float, float], ylims: tuple[float, float], distribution: Literal['Born', 'uniform'] = 'Born', args = (), dtype='double', **odeargs)->list[AnyBohmianOrbit]:
+    def draw_orbits(self, N: int, t: float, xlims: tuple[float, float], ylims: tuple[float, float], distribution: Literal['Born', 'uniform'] = 'Born', args = (), dtype='double', **odeargs)->list[BohmianOrbit]:
         ics =self.draw_ics(N=N, t=t, xlims=xlims, ylims=ylims, args=args, distribution=distribution)
         orbs = [self.orbit(*ic, t0=t, args=args, dtype=dtype, **odeargs) for ic in ics]
         return orbs
     
-    def draw_variational_orbits(self, N: int, t: float, xlims: tuple[float, float], ylims: tuple[float, float], distribution: Literal['Born', 'uniform'] = 'Born', args=(), DELTA_T=0.05, dtype='double', **odeargs)->list[AnyVariationalBohmianOrbit]:
+    def draw_variational_orbits(self, N: int, t: float, xlims: tuple[float, float], ylims: tuple[float, float], distribution: Literal['Born', 'uniform'] = 'Born', args=(), DELTA_T=0.05, dtype='double', **odeargs)->list[VariationalBohmianOrbit]:
         ics = self.draw_ics(N=N, t=t, xlims=xlims, ylims=ylims, args=args, distribution=distribution)
         model = self.varode_sys(DELTA_T=DELTA_T)
         return [model.get_orbit(*ic, t0=t, args=args, dtype=dtype, **odeargs) for ic in ics]
