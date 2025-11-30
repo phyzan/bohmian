@@ -496,7 +496,7 @@ def orbit_colormap(xdata, ydata, **hist_args):
 
     # Add colorbar without exceeding the main axis bounds
     cbar = fig.colorbar(im, cax=cax)
-    cbar.set_label(f'$\\tilde{{\\rho}}$', labelpad=2)
+    cbar.set_label(f'$\\tilde{{\\rho}}$', labelpad=6, fontsize=20, rotation=0)
     fig.tight_layout(pad=1.2)
     
     return fig, ax, cbar
