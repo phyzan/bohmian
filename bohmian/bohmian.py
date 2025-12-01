@@ -1,20 +1,21 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
+from typing import Literal
+import warnings
 import math
-from numiphy.findiffs import grids
-from numiphy.symlib.geom import Line2D, Parallelogram
-from odepack import *
-import matplotlib.pyplot as plt
 import numpy as np
+import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 import scipy.optimize as sciopt
 from scipy.integrate import IntegrationWarning
-import warnings
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-from numiphy.symlib.pylambda import ScalarLambdaExpr, VectorLambdaExpr
-from .orbits import *
-from rootfinder import *
 from mcpy import PDF2D
-from typing import Literal
+from odepack import *
+from rootfinder import *
+from .orbits import *
+from .vectorfields import *
+
+
+
 
 
 class SolvedPotential(ABC):

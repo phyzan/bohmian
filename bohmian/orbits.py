@@ -2,7 +2,6 @@ from __future__ import annotations
 from numiphy.symlib.symcore import *
 from numiphy.toolkit.plotting import *
 from odepack import *
-import mpmath
 
 
 class BohmianOrbit(LowLevelODE):
