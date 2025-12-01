@@ -54,6 +54,9 @@ class VariationalBohmianSystem(OdeSystem):
 
     def get_orbit(self, x0, y0, t0=0., rtol=0., atol=1e-9, min_step=0, max_step=np.inf, first_step=0, direction=1, args=(), method="RK45", scalar_type='double'):
         return VariationalBohmianOrbit(f=self.lowlevel_odefunc(scalar_type), jac=self.lowlevel_jac(scalar_type), t0=t0, q0=[x0, y0, 1, 1], period=self.DELTA_T, rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, direction=direction, args=args, method=method, scalar_type=scalar_type)
+    
+    def get_variational(self, t0, q0, period, *, rtol=0, atol=1e-12, min_step=0, max_step=np.inf, first_step=0, direction=1, args=..., method="RK45", compiled=True, scalar_type='double'):
+        raise NotImplementedError('')
 
     def __eq__(self, other):
         if other is self:

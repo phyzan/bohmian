@@ -274,7 +274,7 @@ class Bohmian2D:
         to_sub = {self.args[i]: args[i] for i in range(len(self.args))}
         xN, yN = self.node(t, args, **kwargs)
         xNdot, yNdot = self.xNdot(t, args, **kwargs)
-        u, v = variables('u, v')
+        u, v = symbols('u, v')
         Udot = self.bohm_field.x.expr.subs(to_sub).subs({self.xvar: u+xN, self.yvar: v+yN, self.tvar: t}) - xNdot
         Vdot = self.bohm_field.y.expr.subs(to_sub).subs({self.xvar: u+xN, self.yvar: v+yN, self.tvar: t}) - yNdot
         return ConservativeVectorField2D([Udot, Vdot], u, v)
