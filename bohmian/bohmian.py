@@ -11,12 +11,76 @@ from scipy.integrate import IntegrationWarning
 from mcpy import PDF2D
 from odepack import *
 from rootfinder import *
-from .orbits import *
 from .vectorfields import *
 
 
 
+class BohmianOrbit(LowLevelODE):
 
+    @property
+    def x(self):
+        return self.q[:, 0]
+    
+    @property
+    def y(self):
+        return self.q[:, 1]
+
+class VariationalBohmianOrbit(VariationalLowLevelODE):
+    
+    @property
+    def x(self):
+        return self.q[:, 0]
+    
+    @property
+    def y(self):
+        return self.q[:, 1]
+    
+    @property
+    def delx(self):
+        return self.q[:, 2]
+    
+    @property
+    def dely(self):
+        return self.q[:, 3]
+
+
+class BohmianSystem(OdeSystem):
+
+    def __init__(self, arg1: Expr|tuple[Expr, Expr, Expr, Expr, Expr], t: Symbol, x: Symbol, y: Symbol, args: Iterable[Symbol], module_name: str=None, directory: str = None):
+
+        if hasattr(arg1, '__iter__'):
+            psi, array = arg1[0], arg1[1:]
+            OdeSystem.__init__(self, [Imag(psi.diff(x)/psi), Imag(psi.diff(y)/psi)], t, [x, y], args=args, directory=directory, module_name=module_name)
+            if len(array) not in (2, 4):
+                raise ValueError('')
+            xdot, ydot = array[:2]
+            self.override_odesys([xdot, ydot])
+            if len(array) == 4:
+                xdot, ydot, delx_dot, dely_dot = array
+                self.override_variational_odesys([xdot, ydot, delx_dot, dely_dot])
+        else:
+            psi = arg1
+            OdeSystem.__init__(self, [Imag(psi.diff(x)/psi), Imag(psi.diff(y)/psi)], t, [x, y], args=args, directory=directory, module_name=module_name)
+        self._psi = psi
+
+    def __eq__(self, other):
+        if other is self:
+            return True
+        elif type(other) is type(self):
+            return (self.psi,) == (other.psi,) and OdeSystem.__eq__(self, other)
+        else:
+            return False
+        
+    @property
+    def psi(self)->Expr:
+        return self._psi
+    
+    def orbit(self, x0, y0, t0=0., rtol=0, atol=1e-12, min_step=0., max_step=np.inf, first_step=0., direction=1, args=(), method="RK45", scalar_type='double', compiled=True):
+        return BohmianOrbit(self.get(t0=t0, q0=[x0, y0], rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, direction=direction, args=args, method=method, compiled=compiled, scalar_type=scalar_type))
+    
+    def variational_orbit(self, x0, y0, t0=0., rtol=0, atol=1e-12, min_step=0., max_step=np.inf, first_step=0., direction=1, args=(), DELTA_T=0.05, method='RK45', scalar_type='double', compiled=True):
+        return VariationalBohmianOrbit(self.get_variational(t0=t0, q0=[x0, y0, 1, 1], period=DELTA_T, rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, direction=direction, args=args, method=method, compiled=compiled, scalar_type=scalar_type))
+        
 
 class SolvedPotential(ABC):
 
@@ -104,37 +168,7 @@ class Bohmian2D:
     with fictitious time parameter "s", not t
     '''
 
-    def __init__(self, data: Expr | tuple[Expr, ...], V: Expr, symbols: tuple[Symbol, ...], args: tuple[Symbol, ...] = (), directory: str = None):
-        var_data: tuple[Expr, ...] = None
-        if hasattr(data, '__iter__'):
-            data: tuple[Expr, ...] = data
-            if len(data) == 3:
-                x, y, t = symbols
-                psi, xdot, ydot = data
-            elif len(data) == 5:
-                x, y, delx, dely, t = symbols
-                psi, xdot, ydot, delxdot, delydot = data
-                var_data = (delx, dely, delxdot, delydot)
-            else:
-                raise ValueError("")
-        else:
-            psi: Expr = data
-            x, y, t = symbols
-            xdot, ydot = Imag(psi.diff(x)/psi), Imag(psi.diff(y)/psi)
-
-        if var_data is None:
-            delx, dely = Symbol(f'del_{x.name}'), Symbol(f'del_{y.name}')
-            delxdot = xdot.diff(x)*delx + xdot.diff(y)*dely
-            delydot = ydot.diff(x)*delx + ydot.diff(y)*dely
-
-        self.tvar, self.xvar, self.yvar, self.delx, self.dely = t, x, y, delx, dely
-        self._odesys_data = xdot, ydot
-        self._varodesys_data = xdot, ydot, delxdot, delydot
-        self.Psi = ScalarLambdaExpr(psi, x, y, self.tvar, *args)
-        self.gradPsi = VectorLambdaExpr([psi.diff(x), psi.diff(y)], x, y, self.tvar, *args)
-
-        self.bohm_field = ConservativeVectorField2D((xdot, ydot), x, y, self.tvar, *args)
-        self._V = V
+    def __init__(self, data: Expr | tuple[Expr, ...], V: Expr, t: Symbol, x: Symbol, y: Symbol, args: tuple[Symbol, ...] = (), directory: str = None):
         if directory is not None:
             self._odesys_modname = 'bohm_sys'
             self._varodesys_modname = 'var_bohm_sys'
@@ -150,7 +184,13 @@ class Bohmian2D:
             self._nodal_point_algebraic_system_modname = None
             self._dir = directory = None
 
-        self._cached_var_ode_sys: dict[float, VariationalBohmianSystem] = {}
+        self.tvar, self.xvar, self.yvar = t, x, y
+        self._odesys = BohmianSystem(data, t, x, y, args=args, module_name=self._odesys_modname, directory=self._dir)
+        psi = self._odesys.psi
+        self.Psi = ScalarLambdaExpr(psi, x, y, t, *args)
+        self.gradPsi = VectorLambdaExpr([psi.diff(x), psi.diff(y)], x, y, t, *args)
+        self.bohm_field = ConservativeVectorField2D(self._odesys.ode_sys[:2], x, y, t, *args)
+        self._V = V
     
     @property
     def args(self):
@@ -193,8 +233,8 @@ class Bohmian2D:
     
     def draw_variational_orbits(self, N: int, t: float, xlims: tuple[float, float], ylims: tuple[float, float], distribution: Literal['Born', 'uniform'] = 'Born', args=(), DELTA_T=0.05, scalar_type='double', **odeargs)->list[VariationalBohmianOrbit]:
         ics = self.draw_ics(N=N, t=t, xlims=xlims, ylims=ylims, args=args, distribution=distribution)
-        model = self.varode_sys(DELTA_T=DELTA_T)
-        return [model.get_orbit(*ic, t0=t, args=args, scalar_type=scalar_type, **odeargs) for ic in ics]
+        odesys = self.ode_system
+        return [odesys.get_variational(t0=t, q0=[*ic, 1, 1], period=DELTA_T, args=args, scalar_type=scalar_type, **odeargs) for ic in ics]
     
     def jacPsi(self, q, t, *args):
         '''
@@ -317,8 +357,8 @@ class Bohmian2D:
         return ConservativeVectorField2D(f, self.xvar, self.yvar, self.tvar, *self.args)
     
     @cached_property
-    def ode_system(self):
-        return OdeSystem(self._odesys_data, self.tvar, [self.xvar, self.yvar], args=self.args, module_name=self._odesys_modname, directory=self._dir)
+    def ode_system(self)->BohmianSystem:
+        return self._odesys
     
     @cached_property
     def nodal_point_odesys(self):
@@ -346,29 +386,13 @@ class Bohmian2D:
     def co_orbit(self, t0, x0, y0, **odeargs):
         return self.nodal_point_odesys.get(t0, [x0, y0], **odeargs)
     
-    def varode_sys(self, DELTA_T):
-        return VariationalBohmianSystem((self.psi, *self._varodesys_data), self.tvar, self.xvar, self.yvar, self.delx, self.dely, self.args, DELTA_T, module_name=self._varodesys_modname, directory=self._dir)
+    def orbit(self, x0, y0, t0=0., rtol=0, atol=1e-12, min_step=0., max_step=np.inf, first_step=0., direction=1, args=(), method="RK45", scalar_type='double', compiled=True)->BohmianOrbit:
+        return self.ode_system.orbit(t0=t0, q0=[x0, y0], rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, direction=direction, args=args, method=method, compiled=compiled, scalar_type=scalar_type)
     
-    def orbit(self, x0, y0, t0=0., rtol=0, atol=1e-12, min_step=0., max_step=np.inf, first_step=0., direction=1, args=(), method="RK45", scalar_type='double'):
-        s = self.ode_system
-        return BohmianOrbit(LowLevelODE(s.lowlevel_odefunc(scalar_type=scalar_type), jac=s.lowlevel_jac(scalar_type=scalar_type), t0=t0, q0=np.array([x0, y0]), rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, direction=direction, args=args, method=method, scalar_type=scalar_type))
+    def variational_orbit(self, x0, y0, t0=0., rtol=0, atol=1e-12, min_step=0., max_step=np.inf, first_step=0., direction=1, args=(), DELTA_T=0.05, method='RK45', scalar_type='double', compiled=True)->VariationalBohmianOrbit:
+        return self.ode_system.variational_orbit(x0=x0, y0=y0, t0=t0, DELTA_T=DELTA_T, rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, direction=direction, args=args, method=method, compiled=compiled, scalar_type=scalar_type)
     
-    def variational_orbit(self, x0, y0, t0=0., rtol=0, atol=1e-12, min_step=0., max_step=np.inf, first_step=0., direction=1, args=(), DELTA_T=0.05, method='RK45', scalar_type='double'):
-        if DELTA_T not in self._cached_var_ode_sys:
-            self._cached_var_ode_sys[DELTA_T] = self.varode_sys(DELTA_T=DELTA_T)
-        
-        return self._cached_var_ode_sys[DELTA_T].get_orbit(x0, y0, t0=t0, rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, direction=direction, args=args, method=method, scalar_type=scalar_type)
-    
-    def rho_time_averaged(
-        self,
-        spatial_grid: grids.Grid,
-        t_span: tuple[float, float],
-        nt: int,
-        chunk_size=2,
-        args=(),
-        threads=-1,
-        device='cpu'
-    ):
+    def rho_time_averaged(self, spatial_grid: grids.Grid, t_span: tuple[float, float], nt: int, chunk_size=2, args=(), threads=-1, device='cpu'):
         # ----------------------------
         # 1. Set threads
         # ----------------------------
