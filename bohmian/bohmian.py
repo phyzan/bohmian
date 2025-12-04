@@ -301,6 +301,39 @@ class Bohmian2D:
     def X_point(self, t, args=(), x0=0, y0=0, **kwargs):
         return self.field_point(self.xNdot(t, args, **kwargs), t, args, x0, y0)
     
+    def X_point_trajectory(self, t0, x0, y0, t_span, dt_search, args, **kwargs):
+        t1, t2 = t_span
+        assert t1 < t0 < t2
+        #determine initial coordinates for the X point
+        x0_xp, y0_xp = self.X_point(t0, args=args, x0=x0, y0=y0, **kwargs)
+
+        t0_xp = t0
+        # follow the X point until t1
+        t_xp_current, x_xp_curr, y_xp_curr = t0_xp, x0_xp, y0_xp
+        xp_data = [[t0_xp, x0_xp, y0_xp]]
+        while t_xp_current > t1:
+            if t_xp_current - dt_search < t1:
+                t_xp_current = t1
+            else:
+                t_xp_current -= dt_search
+            x_xp_curr, y_xp_curr = self.X_point(t_xp_current, args=args, x0=x_xp_curr, y0=y_xp_curr, **kwargs)
+            xp_data.append([t_xp_current, x_xp_curr, y_xp_curr])
+        
+        xp_data.reverse()
+
+        #follow the X point until t2
+        t_xp_current, x_xp_curr, y_xp_curr = t0_xp, x0_xp, y0_xp
+        while t_xp_current < t2:
+            if t_xp_current + dt_search > t1:
+                t_xp_current = t2
+            else:
+                t_xp_current += dt_search
+            x_xp_curr, y_xp_curr = self.X_point(t_xp_current, args=args, x0=x_xp_curr, y0=y_xp_curr, **kwargs)
+            xp_data.append([t_xp_current, x_xp_curr, y_xp_curr])
+
+        return np.array(xp_data)
+
+    
     def field_point(self, value, t, args=(), x0=0, y0=0):
         f = lambda q, *args: self.bohm_field.call(q, *args) - value
         res = sciopt.root(f, [x0, y0], jac = self.bohm_field.calljac, args=(t, *args))
@@ -387,7 +420,7 @@ class Bohmian2D:
         return self.nodal_point_odesys.get(t0, [x0, y0], **odeargs)
     
     def orbit(self, x0, y0, t0=0., rtol=0, atol=1e-12, min_step=0., max_step=np.inf, first_step=0., direction=1, args=(), method="RK45", scalar_type='double', compiled=True)->BohmianOrbit:
-        return self.ode_system.orbit(t0=t0, q0=[x0, y0], rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, direction=direction, args=args, method=method, compiled=compiled, scalar_type=scalar_type)
+        return self.ode_system.orbit(x0=x0, y0=y0, t0=t0, rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, direction=direction, args=args, method=method, compiled=compiled, scalar_type=scalar_type)
     
     def variational_orbit(self, x0, y0, t0=0., rtol=0, atol=1e-12, min_step=0., max_step=np.inf, first_step=0., direction=1, args=(), DELTA_T=0.05, method='RK45', scalar_type='double', compiled=True)->VariationalBohmianOrbit:
         return self.ode_system.variational_orbit(x0=x0, y0=y0, t0=t0, DELTA_T=DELTA_T, rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, direction=direction, args=args, method=method, compiled=compiled, scalar_type=scalar_type)
