@@ -538,9 +538,7 @@ class Bohmian2D:
             hist /= (hist.sum() * np.outer(np.diff(xbins), np.diff(ybins)))
 
         grid = grids.Uniform1D(*xlims, bins[0]) * grids.Uniform1D(*ylims, bins[1])
-        fig, ax, cbar = plot(hist, grid, **plotargs)
-        fig.set_size_inches(5, 5)
-        ax.set_aspect('equal')
+        fig, ax, cbar = plot(hist, grid, figsize=(5, 5), aspect='equal', **plotargs)
         return fig, ax, cbar
 
 def orbit_colormap(xdata, ydata, **hist_args):
