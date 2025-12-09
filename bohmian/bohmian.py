@@ -50,6 +50,7 @@ class BohmianSystem(OdeSystem):
 
         if hasattr(arg1, '__iter__'):
             psi, array = arg1[0], arg1[1:]
+            self._psi = psi
             OdeSystem.__init__(self, [Imag(psi.diff(x)/psi), Imag(psi.diff(y)/psi)], t, [x, y], args=args, directory=directory, module_name=module_name)
             if len(array) not in (2, 4):
                 raise ValueError('')
@@ -60,8 +61,8 @@ class BohmianSystem(OdeSystem):
                 self.override_variational_odesys([xdot, ydot, delx_dot, dely_dot])
         else:
             psi = arg1
+            self._psi = psi
             OdeSystem.__init__(self, [Imag(psi.diff(x)/psi), Imag(psi.diff(y)/psi)], t, [x, y], args=args, directory=directory, module_name=module_name)
-        self._psi = psi
 
     def __eq__(self, other):
         if other is self:
