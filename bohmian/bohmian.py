@@ -538,6 +538,8 @@ class Bohmian2D:
 
         grid = grids.Uniform1D(*xlims, bins[0]) * grids.Uniform1D(*ylims, bins[1])
         fig, ax, cbar = plot(hist, grid, **plotargs)
+        fig.set_size_inches(5, 5)
+        ax.set_aspect('equal')
         return fig, ax, cbar
 
 def orbit_colormap(xdata, ydata, **hist_args):
