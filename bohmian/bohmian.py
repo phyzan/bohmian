@@ -426,6 +426,9 @@ class Bohmian2D:
     def variational_orbit(self, x0, y0, t0=0., rtol=0, atol=1e-12, min_step=0., max_step=np.inf, first_step=0., direction=1, args=(), DELTA_T=0.05, method='RK45', scalar_type='double', compiled=True)->VariationalBohmianOrbit:
         return self.ode_system.variational_orbit(x0=x0, y0=y0, t0=t0, DELTA_T=DELTA_T, rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, direction=direction, args=args, method=method, compiled=compiled, scalar_type=scalar_type)
     
+    def variational_solver(self, x0, y0, t0=0., rtol=0, atol=1e-12, min_step=0., max_step=np.inf, first_step=0., direction=1, args=(), DELTA_T=0.05, method='RK45', scalar_type='double', compiled=True)->VariationalSolver:
+        return self.ode_system.get_var_solver(t0=t0, q0=[x0, y0, 1, 1], period=DELTA_T, rtol=rtol, atol=atol, min_step=min_step, max_step=max_step, first_step=first_step, direction=direction, args=args, method=method, compiled=compiled, scalar_type=scalar_type)
+    
     def rho_time_averaged(self, spatial_grid: grids.Grid, t_span: tuple[float, float], nt: int, chunk_size=2, args=(), threads=-1, device='cpu'):
         # ----------------------------
         # 1. Set threads
