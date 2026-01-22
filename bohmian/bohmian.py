@@ -235,7 +235,12 @@ class Bohmian2D:
     def draw_variational_orbits(self, N: int, t: float, xlims: tuple[float, float], ylims: tuple[float, float], distribution: Literal['Born', 'uniform'] = 'Born', args=(), DELTA_T=0.05, scalar_type='double', **odeargs)->list[VariationalBohmianOrbit]:
         ics = self.draw_ics(N=N, t=t, xlims=xlims, ylims=ylims, args=args, distribution=distribution)
         odesys = self.ode_system
-        return [odesys.get_variational(t0=t, q0=[*ic, 1, 1], period=DELTA_T, args=args, scalar_type=scalar_type, **odeargs) for ic in ics]
+        return [VariationalBohmianOrbit(odesys.get_variational(t0=t, q0=[*ic, 1, 1], period=DELTA_T, args=args, scalar_type=scalar_type, **odeargs)) for ic in ics]
+    
+    def draw_variational_solvers(self, N: int, t: float, xlims: tuple[float, float], ylims: tuple[float, float], distribution: Literal['Born', 'uniform'] = 'Born', args=(), DELTA_T=0.05, scalar_type='double', **odeargs)->list[VariationalSolver]:
+        ics = self.draw_ics(N=N, t=t, xlims=xlims, ylims=ylims, args=args, distribution=distribution)
+        odesys = self.ode_system
+        return [odesys.get_var_solver(t0=t, q0=[*ic, 1, 1], period=DELTA_T, args=args, scalar_type=scalar_type, **odeargs) for ic in ics]
     
     def jacPsi(self, q, t, *args):
         '''
