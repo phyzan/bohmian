@@ -107,6 +107,7 @@ class VectorField2D:
 
             ax.set_xlim(*xlims)
             ax.set_ylim(*ylims)
+            fig.set_size_inches(figure.figsize)
 
         def update(event):
             xlims = ax.get_xlim()
